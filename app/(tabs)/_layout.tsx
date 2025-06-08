@@ -1,8 +1,19 @@
+import { MaterialIcons } from '@expo/vector-icons';
+import { router, Tabs } from 'expo-router';
 import React from 'react';
-import { Tabs } from 'expo-router';
-import { MaterialIcons} from '@expo/vector-icons';
+import { Text, TouchableOpacity } from 'react-native';
+import { supabase } from '../../lib/supabase';
 
 export default function TabLayout() {
+  const handleSignOut = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      console.error('Error signing out:', error.message);
+    } else {
+      router.replace('/auth/login');
+    }
+  };
+
   return (
     <Tabs
        screenOptions={{
@@ -61,6 +72,14 @@ export default function TabLayout() {
           title: 'Profile',
           tabBarIcon: ({ color, size }) => (
             <MaterialIcons name="account-circle" color={color} size={size} />
+          ),
+          headerRight: () => (
+            <TouchableOpacity
+              onPress={handleSignOut}
+              style={{ marginRight: 15 }}
+            >
+              <Text style={{ color: '#0ea5e9', fontSize: 16 }}>Sign Out</Text>
+            </TouchableOpacity>
           ),
         }}
       />
