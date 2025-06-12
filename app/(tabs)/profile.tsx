@@ -1,19 +1,21 @@
-import { router } from 'expo-router';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { supabase } from '../../lib/supabase';
+import React from 'react'
+import { router } from 'expo-router'
+import { StyleSheet, Text, TouchableOpacity } from 'react-native'
+import Screen from '../../components/Screen'
+import { supabase } from '../../lib/supabase'
 
 export default function ProfileScreen() {
   const handleSignOut = async () => {
-    const { error } = await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut()
     if (error) {
-      console.error('Error signing out:', error.message);
+      console.error('Error signing out:', error.message)
     } else {
-      router.replace('/auth/login');
+      router.replace('/auth/login')
     }
-  };
+  }
 
   return (
-    <View style={styles.container}>
+    <Screen style={styles.container}>
       <Text style={styles.title}>Profile</Text>
       
       <TouchableOpacity 
@@ -22,13 +24,12 @@ export default function ProfileScreen() {
       >
         <Text style={styles.signOutText}>Sign Out</Text>
       </TouchableOpacity>
-    </View>
-  );
+    </Screen>
+  )
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
     padding: 20,
     backgroundColor: '#fff',
   },
@@ -49,4 +50,4 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-});
+})
