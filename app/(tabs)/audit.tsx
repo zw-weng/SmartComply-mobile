@@ -1,51 +1,95 @@
+import { router } from 'expo-router'
 import React, { useEffect, useState } from 'react'
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native'
-import { supabase } from '../../lib/supabase'
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native'
+import Card from '../../components/Card'
+import ListItem from '../../components/ListItem'
 import Screen from '../../components/Screen'
+import StatusBadge from '../../components/StatusBadge'
+import { supabase } from '../../lib/supabase'
+
+interface ComplianceRecord {
+  id: number
+  name: string
+  status: string
+  description?: string
+}
 
 const Audit = () => {
-  const [compliances, setCompliances] = useState<any[]>([])
+  const [compliances, setCompliances] = useState<ComplianceRecord[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
-  useEffect(() => {
-    const fetchCompliances = async () => {
-      setLoading(true)
+  const fetchCompliances = async () => {
+    try {
       const { data, error } = await supabase.from('compliance').select('*')
       if (!error && data) {
-        setCompliances(data)
+        setCompliances(data as ComplianceRecord[])
       }
+    } catch (error) {
+      console.error('Error fetching compliances:', error)
+    } finally {
       setLoading(false)
+      setRefreshing(false)
     }
+  }
+
+  useEffect(() => {
     fetchCompliances()
   }, [])
 
-  const renderItem = ({ item }: { item: any }) => (
-    <View style={styles.row}>
-      <Text style={styles.cell}>{item.id}</Text>
-      <Text style={styles.cell}>{item.name}</Text>
-      <Text style={styles.cell}>{item.status}</Text>
-    </View>
+  const onRefresh = () => {
+    setRefreshing(true)
+    fetchCompliances()
+  }
+
+  const renderComplianceItem = ({ item }: { item: ComplianceRecord }) => (
+    <ListItem
+      title={item.name}
+      subtitle={item.description || `Compliance ID: ${item.id}`}
+      rightElement={<StatusBadge status={item.status} />}
+      leftIcon="assignment"
+      onPress={() => router.push({ pathname: '/audit/[id]', params: { id: item.id } })}
+    />
   )
+
+  const renderEmptyState = () => (
+    <Card style={styles.emptyCard}>
+      <Text style={styles.emptyTitle}>No Compliance Records</Text>
+      <Text style={styles.emptyDescription}>
+        There are no compliance records available at the moment.
+      </Text>
+    </Card>
+  )
+
+  if (loading) {
+    return (
+      <Screen style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#3b82f6" />
+          <Text style={styles.loadingText}>Loading compliance records...</Text>
+        </View>
+      </Screen>
+    )
+  }
 
   return (
     <Screen style={styles.container}>
-      <Text style={styles.title}>Compliance List</Text>
-
-      <View style={styles.headerRow}>
-        <Text style={[styles.cell, styles.headerCell]}>ID</Text>
-        <Text style={[styles.cell, styles.headerCell]}>Name</Text>
-        <Text style={[styles.cell, styles.headerCell]}>Status</Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>Compliance Audit</Text>
+        <Text style={styles.subtitle}>Manage and review compliance records</Text>
       </View>
 
-      {loading ? (
-        <ActivityIndicator size="large" color="#0ea5e9" style={{ marginTop: 20 }} />
-      ) : (
-        <FlatList
-          data={compliances}
-          keyExtractor={item => item.id.toString()}
-          renderItem={renderItem}
-        />
-      )}
+      <FlatList
+        data={compliances}
+        keyExtractor={item => item.id.toString()}
+        renderItem={renderComplianceItem}
+        ListEmptyComponent={renderEmptyState}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.listContainer}
+      />
     </Screen>
   )
 }
@@ -54,36 +98,53 @@ export default Audit
 
 const styles = StyleSheet.create({
   container: {
-    padding: 16,
-    backgroundColor: '#fff',
+    flex: 1,
+    backgroundColor: '#f8fafc',
+  },
+  header: {
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 24,
   },
   title: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: 'bold',
-    marginBottom: 16,
-    color: '#0ea5e9',
-    textAlign: 'center',
+    color: '#1f2937',
+    marginBottom: 4,
   },
-  headerRow: {
-    flexDirection: 'row',
-    borderBottomWidth: 2,
-    borderBottomColor: '#0ea5e9',
-    paddingBottom: 8,
+  subtitle: {
+    fontSize: 16,
+    color: '#6b7280',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#6b7280',
+  },
+  listContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 100, // Account for tab bar
+  },
+  emptyCard: {
+    margin: 16,
+    alignItems: 'center',
+    paddingVertical: 32,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#374151',
     marginBottom: 8,
   },
-  row: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-    paddingVertical: 8,
-  },
-  cell: {
-    flex: 1,
+  emptyDescription: {
     fontSize: 16,
+    color: '#6b7280',
     textAlign: 'center',
-  },
-  headerCell: {
-    fontWeight: 'bold',
-    color: '#0284c7',
+    lineHeight: 24,
   },
 })
