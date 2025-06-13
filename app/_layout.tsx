@@ -1,25 +1,52 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
+import { checkUserRole } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 import './global.css';
 
-export default function RootLayout() {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+export default function RootLayout() {  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState(true);
   const segments = useSegments();
   const router = useRouter();
 
   useEffect(() => {
-    // Check session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setIsAuthenticated(!!session);
+    // Check session and user role
+    const initializeAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session?.user) {
+        const hasValidRole = await checkUserRole(session.user.id);
+        if (!hasValidRole) {
+          // Sign out user with invalid role
+          await supabase.auth.signOut();
+          setIsAuthenticated(false);
+        } else {
+          setIsAuthenticated(true);
+        }
+      } else {
+        setIsAuthenticated(false);
+      }
+      
       setIsLoading(false);
-    });
+    };
+
+    initializeAuth();
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsAuthenticated(!!session);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        const hasValidRole = await checkUserRole(session.user.id);
+        if (!hasValidRole) {
+          // Sign out user with invalid role
+          await supabase.auth.signOut();
+          setIsAuthenticated(false);
+        } else {
+          setIsAuthenticated(true);
+        }
+      } else {
+        setIsAuthenticated(false);
+      }
     });
 
     return () => {

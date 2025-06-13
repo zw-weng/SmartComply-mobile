@@ -10,11 +10,11 @@ export default function AuthLayout() {
         }}
       />
       <Stack.Screen 
-        name="signup" 
+        name="forgot-password" 
         options={{
-          title: 'Sign Up',
+          title: 'Reset Password',
         }}
       />
     </Stack>
   );
-} 
+}

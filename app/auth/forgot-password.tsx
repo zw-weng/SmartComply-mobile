@@ -37,7 +37,7 @@ export default function ForgotPassword() {
     
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: 'https://yourapp.com/reset-password',
+        redirectTo: 'https://yourapp.com/reset-password', // Replace with your reset URL
       });
 
       if (error) {
@@ -56,13 +56,11 @@ export default function ForgotPassword() {
     
     setLoading(false);
   }
-
   return (
     <View className="flex-1 justify-center px-6 bg-white">
       <Text className="text-3xl font-bold text-primary-600 mb-4">Reset Password</Text>
-      <Text className="text-gray-600 mb-8">
-        Enter your email address and we'll send you a link to reset your password.
-      </Text>
+      
+      <Text className="text-gray-600 mb-8">Enter your email address and we'll send you a link to reset your password.</Text>
       
       <TextInput
         className="w-full bg-gray-100 rounded-lg px-4 py-3 mb-6"

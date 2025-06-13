@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Platform, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { checkUserRole } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
 
 export default function Login() {
@@ -22,7 +23,6 @@ export default function Login() {
       return;
     }
 
-    // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       showAlert('Error', 'Please enter a valid email address');
@@ -30,23 +30,41 @@ export default function Login() {
     }
 
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    
+    try {
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) {
-      if (error.message.includes('Invalid login credentials')) {
-        showAlert('Error', 'Invalid email or password');
-      } else if (error.message.includes('Email not confirmed')) {
-        showAlert('Error', 'Please verify your email address first');
-      } else {
-        showAlert('Error', error.message);
+      if (authError) {
+        if (authError.message.includes('Invalid login credentials')) {
+          showAlert('Error', 'Invalid email or password');
+        } else if (authError.message.includes('Email not confirmed')) {
+          showAlert('Error', 'Please verify your email address first');
+        } else {
+          showAlert('Error', authError.message);
+        }
+        setLoading(false);
+        return;
       }
-    } else {
+
+      const hasValidRole = await checkUserRole(authData.user.id);
+      
+      if (!hasValidRole) {
+        await supabase.auth.signOut();
+        showAlert('Access Denied', 'Only users with user role can access this application.');
+        setLoading(false);
+        return;
+      }
+
       showAlert('Success', 'Successfully logged in!');
       router.replace('/(tabs)');
+    } catch (error) {
+      console.error('Login error:', error);
+      showAlert('Error', 'An unexpected error occurred. Please try again.');
     }
+    
     setLoading(false);
   }
 
@@ -70,7 +88,7 @@ export default function Login() {
         onChangeText={setPassword}
         secureTextEntry
       />
-
+      
       <TouchableOpacity
         className="w-full bg-primary-500 rounded-lg py-3 mb-4"
         onPress={signInWithEmail}
@@ -80,15 +98,18 @@ export default function Login() {
           {loading ? 'Signing in...' : 'Sign In'}
         </Text>
       </TouchableOpacity>
-
-      <TouchableOpacity
-        onPress={() => router.push('/auth/signup')}
-        className="mt-4"
-      >
+      
+      <View className="mt-4">
         <Text className="text-center text-gray-600">
-          Don't have an account? <Text className="text-primary-500">Sign Up</Text>
+          Forgot your password?{' '}
+          <Text 
+            className="text-primary-500"
+            onPress={() => router.push('/auth/forgot-password')}
+          >
+            Reset Password
+          </Text>
         </Text>
-      </TouchableOpacity>
+      </View>
     </View>
   );
-} 
+}
