@@ -157,10 +157,9 @@ const styles = StyleSheet.create({
         marginTop: 16,
         fontSize: 16,
         color: '#6b7280',
-    },
-    listContainer: {
+    },    listContainer: {
         paddingHorizontal: 16,
-        paddingBottom: 100, // Account for tab bar
+        paddingBottom: 120, // Account for redesigned tab bar
     },
     emptyCard: {
         margin: 16,

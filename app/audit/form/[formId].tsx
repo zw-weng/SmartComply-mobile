@@ -283,7 +283,11 @@ export default function FormScreen() {
         )}
       </View>
 
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.scrollView} 
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {schema.fields.map((field) => (
           <View key={field.id} style={styles.fieldContainer}>
             <Text style={styles.fieldLabel}>
@@ -336,10 +340,12 @@ const styles = StyleSheet.create({  container: {
     fontSize: 16,
     color: '#6b7280',
     lineHeight: 24,
-  },
-  scrollView: {
+  },  scrollView: {
     flex: 1,
     paddingHorizontal: 16,
+  },
+  scrollContent: {
+    paddingBottom: 100, // Account for tab bar
   },
   fieldContainer: { 
     marginBottom: 24,

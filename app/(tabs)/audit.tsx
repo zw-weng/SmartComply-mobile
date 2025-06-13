@@ -128,7 +128,7 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     paddingHorizontal: 16,
-    paddingBottom: 100, // Account for tab bar
+    paddingBottom: 120, // Account for redesigned tab bar
   },
   emptyCard: {
     margin: 16,

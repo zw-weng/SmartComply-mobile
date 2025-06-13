@@ -1,10 +1,11 @@
-import { MaterialIcons } from '@expo/vector-icons'
 import { router } from 'expo-router'
 import React, { useEffect, useState } from 'react'
-import { FlatList, StyleSheet, Text, View } from 'react-native'
+import { ScrollView, StyleSheet, Text, View } from 'react-native'
 import Button from '../../components/Button'
 import Card from '../../components/Card'
+import DashboardHeader from '../../components/DashboardHeader'
 import Screen from '../../components/Screen'
+import StatsGrid, { StatData } from '../../components/StatsGrid'
 import StatusBadge from '../../components/StatusBadge'
 import { supabase } from '../../lib/supabase'
 
@@ -97,33 +98,36 @@ export default function Index() {
     }
   }
 
-  const StatCard = ({ title, value, icon, color }: {
-    title: string
-    value: number
-    icon: string
-    color: string
-  }) => (
-    <Card variant="default" style={styles.statCard}>
-      <View style={styles.statContent}>
-        <View style={[styles.iconContainer, { backgroundColor: color + '20' }]}>
-          <MaterialIcons name={icon as any} size={24} color={color} />
-        </View>
-        <View style={styles.statText}>
-          <Text style={styles.statValue}>{value}</Text>
-          <Text style={styles.statTitle}>{title}</Text>
-        </View>
-      </View>
-    </Card>
-  )
+  const statsData: StatData[] = [
+    {
+      title: 'Total Records',
+      value: stats.totalCompliance,
+      icon: 'folder',
+      color: '#3b82f6'
+    },
+    {
+      title: 'Pending Audits',
+      value: stats.pendingAudits,
+      icon: 'pending-actions',
+      color: '#f59e0b'
+    },
+    {
+      title: 'Completed Forms',
+      value: stats.completedForms,
+      icon: 'check-circle',
+      color: '#10b981'
+    },
+    {
+      title: 'Failed Items',
+      value: stats.failedItems,
+      icon: 'error',
+      color: '#ef4444'
+    }
+  ]
 
   const ActivityItem = ({ item }: { item: RecentActivity }) => (
     <View style={styles.activityItem}>
       <View style={styles.activityContent}>
-        <MaterialIcons 
-          name={item.type === 'audit' ? 'assignment' : item.type === 'form' ? 'description' : 'verified-user'} 
-          size={20} 
-          color="#6b7280" 
-        />
         <View style={styles.activityText}>
           <Text style={styles.activityTitle}>{item.title}</Text>
           <Text style={styles.activityDate}>{item.date}</Text>
@@ -135,79 +139,54 @@ export default function Index() {
 
   return (
     <Screen style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.welcomeText}>Welcome back!</Text>
-        <Text style={styles.subtitle}>Here's your compliance overview</Text>
-      </View>
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <DashboardHeader 
+          title="Welcome back!"
+          subtitle="Here's your compliance overview"
+        />
 
-      {/* Stats Grid */}
-      <View style={styles.statsGrid}>
-        <StatCard 
-          title="Total Records" 
-          value={stats.totalCompliance} 
-          icon="folder" 
-          color="#3b82f6" 
-        />
-        <StatCard 
-          title="Pending Audits" 
-          value={stats.pendingAudits} 
-          icon="pending-actions" 
-          color="#f59e0b" 
-        />
-        <StatCard 
-          title="Completed Forms" 
-          value={stats.completedForms} 
-          icon="check-circle" 
-          color="#10b981" 
-        />
-        <StatCard 
-          title="Failed Items" 
-          value={stats.failedItems} 
-          icon="error" 
-          color="#ef4444" 
-        />
-      </View>
+        <StatsGrid stats={statsData} />
 
-      {/* Quick Actions */}
-      <Card variant="default" style={styles.actionsCard}>
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <View style={styles.actionsGrid}>
+        {/* Quick Actions */}
+        <Card variant="default" style={styles.actionsCard}>
+          <Text style={styles.sectionTitle}>Quick Actions</Text>
+          <View style={styles.actionsGrid}>
+            <Button
+              title="Start New Audit"
+              onPress={() => router.push('/audit')}
+              variant="primary"
+              size="medium"
+              style={styles.actionButton}
+            />
+            <Button
+              title="View Reports"
+              onPress={() => router.push('/audit')}
+              variant="secondary"
+              size="medium"
+              style={styles.actionButton}
+            />
+          </View>
+        </Card>
+
+        {/* Recent Activity */}
+        <Card variant="default" style={styles.activityCard}>
+          <Text style={styles.sectionTitle}>Recent Activity</Text>
+          {recentActivity.map((item) => (
+            <ActivityItem key={item.id} item={item} />
+          ))}
           <Button
-            title="Start New Audit"
+            title="View All Activity"
             onPress={() => router.push('/audit')}
-            variant="primary"
-            size="medium"
-            style={styles.actionButton}
+            variant="ghost"
+            size="small"
+            style={styles.viewAllButton}
           />
-          <Button
-            title="View Reports"
-            onPress={() => router.push('/audit')}
-            variant="secondary"
-            size="medium"
-            style={styles.actionButton}
-          />
-        </View>
-      </Card>
-
-      {/* Recent Activity */}
-      <Card variant="default" style={styles.activityCard}>
-        <Text style={styles.sectionTitle}>Recent Activity</Text>
-        <FlatList
-          data={recentActivity}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <ActivityItem item={item} />}
-          showsVerticalScrollIndicator={false}
-          scrollEnabled={false}
-        />
-        <Button
-          title="View All Activity"
-          onPress={() => router.push('/audit')}
-          variant="ghost"
-          size="small"
-          style={styles.viewAllButton}
-        />
-      </Card>
+        </Card>
+      </ScrollView>
     </Screen>
   )
 }
@@ -216,7 +195,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8fafc',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
     padding: 16,
+    paddingBottom: 100, // Extra padding for custom tab bar
   },
   header: {
     marginBottom: 24,
@@ -286,7 +271,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   activityCard: {
-    flex: 1,
+    marginBottom: 24,
   },
   activityItem: {
     marginBottom: 12,

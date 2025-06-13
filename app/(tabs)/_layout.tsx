@@ -12,48 +12,52 @@ export default function TabLayout() {
     } else {
       router.replace('/auth/login');
     }
-  };
-
-  return (
+  };  return (
     <Tabs
-       screenOptions={{
+      screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#1E3A8A',
-        tabBarInactiveTintColor: '#6b7280',
+        tabBarActiveTintColor: '#3b82f6',
+        tabBarInactiveTintColor: '#9ca3af',
         tabBarItemStyle: {
           height: '100%',
           justifyContent: 'center',
           alignItems: 'center',
-          marginTop: 4
+          paddingTop: 8,
+          paddingBottom: 6,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: 'bold',
-          marginTop: 2,
+          fontSize: 11,
+          fontWeight: '600',
+          marginTop: 4,
+          letterSpacing: 0.3,
         },
         tabBarStyle: {
-          backgroundColor: 'white',
-          borderRadius: 50,
-          marginHorizontal: 20,
-          marginBottom: 36,
-          height: 75,
+          backgroundColor: '#ffffff',
+          borderRadius: 25,
+          marginHorizontal: 16,
+          marginBottom: 34,
+          height: 70,
           position: 'absolute',
-          overflow: 'hidden',
-          borderWidth: 1,
-          borderColor: '#D1D5DB',
-          shadowColor: 'rgba(0, 0, 0, 0.1)',
-          shadowOffset: { width: 0, height: -3 },
-          shadowOpacity: 0.1,
-          shadowRadius: 6,
+          borderWidth: 0.5,
+          borderColor: '#e5e7eb',
+          shadowColor: '#000000',
+          shadowOffset: { width: 0, height: 8 },
+          shadowOpacity: 0.15,
+          shadowRadius: 16,
+          elevation: 12,
+          paddingBottom: 0,
         }
       }}
-    >
-      <Tabs.Screen
+    >      <Tabs.Screen
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="home" color={color} size={size} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <MaterialIcons 
+              name="home" 
+              color={focused ? '#3b82f6' : color} 
+              size={focused ? 26 : 24} 
+            />
           ),
         }}
       />
@@ -61,8 +65,12 @@ export default function TabLayout() {
         name="audit"
         options={{
           title: 'Audit',
-          tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="assignment" color={color} size={size} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <MaterialIcons 
+              name="assignment" 
+              color={focused ? '#3b82f6' : color} 
+              size={focused ? 26 : 24} 
+            />
           ),
         }}
       />
@@ -70,8 +78,12 @@ export default function TabLayout() {
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="account-circle" color={color} size={size} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <MaterialIcons 
+              name="account-circle" 
+              color={focused ? '#3b82f6' : color} 
+              size={focused ? 26 : 24} 
+            />
           ),
           headerRight: () => (
             <TouchableOpacity
