@@ -46,6 +46,7 @@ export default function FormScreen() {
   const { id, formId } = useLocalSearchParams<{ id: string; formId: string }>()
   const [schema, setSchema] = useState<FormRecord['form_schema'] | null>(null)
   const [values, setValues] = useState<Record<string, any>>({})
+  const [userComments, setUserComments] = useState('')
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -140,32 +141,102 @@ export default function FormScreen() {
       )
       return
     }
-
     submitForm()
   }
-
+  
   const submitForm = async () => {
     setSubmitting(true)
     try {
-      // Here you would typically save the form response to your database
-      // For now, we'll just log it
-      console.log('Form submitted:', {
-        formId,
-        values,
-        timestamp: new Date().toISOString()
-      })
+      // Calculate total score and determine pass/fail
+      const scoreResult = calculateScore()
+      const autoFailCheck = checkAutoFail()
+      const finalResult = autoFailCheck.isFail ? 'fail' : (scoreResult.passPercentage >= 70 ? 'pass' : 'fail')
+      const finalStatus = autoFailCheck.isFail ? 'failed' : (scoreResult.passPercentage >= 70 ? 'completed' : 'failed')
       
-      Alert.alert('Success', 'Form submitted successfully!', [
-        { text: 'OK', onPress: () => {
-          // Navigate back or to next form
-        }}
-      ])
+      // Prepare detailed form responses for JSON storage
+      const formResponses = {
+        formId,
+        formTitle: schema?.title,
+        submittedAt: new Date().toISOString(),
+        responses: schema?.fields.map(field => ({
+          fieldId: field.id,
+          fieldLabel: field.label,
+          fieldType: field.type,
+          value: values[field.id],
+          required: field.required,
+          autoFail: field.autoFail,
+          points: field.enhancedOptions?.find(opt => opt.value === values[field.id])?.points || 0
+        })) || [],
+        scoreBreakdown: scoreResult,
+        autoFailInfo: autoFailCheck
+      }
+      
+      // Save form response directly to audit table
+      const { data: auditData, error: auditError } = await supabase
+        .from('audit')
+        .insert({
+          form_id: formId,
+          user_id: '00000000-0000-0000-0000-000000000000',
+          status: finalStatus,
+          result: finalResult,
+          marks: scoreResult.totalScore,
+          percentage: scoreResult.passPercentage,
+          comments: userComments || '',
+          responses: formResponses,
+        })
+        .select()
+        .single()
+
+      if (auditError) throw auditError
+      
+      Alert.alert(
+        'Audit Completed', 
+        `Form submitted successfully!\n\nScore: ${scoreResult.totalScore}/${scoreResult.maxScore}\nPercentage: ${scoreResult.passPercentage.toFixed(1)}%\nResult: ${finalResult.toUpperCase()}\nStatus: ${finalStatus.toUpperCase()}`, 
+        [
+          { 
+            text: 'View Audit', 
+            onPress: () => {
+              router.push(`/audit/${id}`)
+            }
+          }
+        ]
+      )
     } catch (error) {
       console.error('Error submitting form:', error)
-      Alert.alert('Error', 'Failed to submit form. Please try again.')
+      Alert.alert('Error', 'Failed to submit audit. Please try again.')
     } finally {
       setSubmitting(false)
     }
+  }
+
+  const calculateScore = () => {
+    let totalScore = 0
+    let maxScore = 0
+
+    schema?.fields.forEach((field) => {
+      const value = values[field.id]
+      
+      if (field.enhancedOptions) {
+        const selectedOption = field.enhancedOptions.find(opt => opt.value === value)
+        if (selectedOption) {
+          totalScore += selectedOption.points
+        }
+        maxScore += Math.max(...field.enhancedOptions.map(opt => opt.points))
+      } else if (field.type === 'boolean') {
+        if (value === true) totalScore += 1
+        maxScore += 1
+      } else if (field.type === 'select' && field.options) {
+        if (value && value !== '') totalScore += 1
+        maxScore += 1
+      } else if ((field.type === 'text' || field.type === 'textarea' || field.type === 'number') && field.required) {
+        if (value && value !== '') totalScore += 1
+        maxScore += 1
+      }
+    })
+
+    const passPercentage = maxScore > 0 ? (totalScore / maxScore) * 100 : 0
+    
+    return { totalScore, maxScore, passPercentage }
   }
 
   const renderField = (field: FieldDef) => {
@@ -220,13 +291,18 @@ export default function FormScreen() {
         )
 
       case 'select':
-        const options = field.enhancedOptions || field.options?.map(opt => ({ value: opt, points: 0, isFailOption: false })) || []
+        const options = field.enhancedOptions || 
+          (field.options ? field.options.map(opt => ({ 
+            value: String(opt), 
+            points: 0, 
+            isFailOption: false 
+          })) : [])
         
         return (
           <View style={[styles.pickerContainer, hasError && styles.inputError]}>
             <Picker
               selectedValue={value}
-              onValueChange={(itemValue) => handleChange(field.id, itemValue)}
+              onValueChange={(itemValue) => handleChange(field.id, String(itemValue))}
               style={styles.picker}
             >
               <Picker.Item 
@@ -238,8 +314,8 @@ export default function FormScreen() {
               {options.map((option, index) => (
                 <Picker.Item
                   key={index}
-                  label={option.value}
-                  value={option.value}
+                  label={String(option.value)}
+                  value={String(option.value)}
                   color={option.isFailOption ? '#ef4444' : '#000'}
                 />
               ))}
@@ -248,7 +324,7 @@ export default function FormScreen() {
         )
 
       default:
-        return <Text style={styles.unsupportedField}>Unsupported field type: {field.type}</Text>
+        return <Text style={styles.unsupportedField}>{`Unsupported field type: ${field.type}`}</Text>
     }
   }
 
@@ -268,6 +344,7 @@ export default function FormScreen() {
       </Screen>
     )
   }
+
   return (
     <Screen style={styles.container}>
       <BackButton 
@@ -304,13 +381,29 @@ export default function FormScreen() {
           </View>
         ))}
 
+        <View style={styles.fieldContainer}>
+          <Text style={styles.fieldLabel}>
+            Comments
+            <Text style={styles.optional}> (Optional)</Text>
+          </Text>
+          <TextInput
+            style={[styles.input, styles.commentsInput]}
+            placeholder="Add any additional comments or observations..."
+            value={userComments}
+            onChangeText={setUserComments}
+            multiline={true}
+            numberOfLines={4}
+            textAlignVertical="top"
+          />
+        </View>
+
         <Pressable 
           style={[styles.submitButton, submitting && styles.submitButtonDisabled]} 
           onPress={handleSubmit}
           disabled={submitting}
         >
           <Text style={styles.submitButtonText}>
-            {submitting ? 'Submitting...' : 'Submit Form (Preview Only)'}
+            {submitting ? 'Submitting...' : 'Submit Form'}
           </Text>
         </Pressable>
       </ScrollView>
@@ -318,7 +411,8 @@ export default function FormScreen() {
   )
 }
 
-const styles = StyleSheet.create({  container: { 
+const styles = StyleSheet.create({
+  container: {
     flex: 1,
     backgroundColor: '#f8fafc',
   },
@@ -340,12 +434,13 @@ const styles = StyleSheet.create({  container: {
     fontSize: 16,
     color: '#6b7280',
     lineHeight: 24,
-  },  scrollView: {
+  },
+  scrollView: {
     flex: 1,
     paddingHorizontal: 16,
   },
   scrollContent: {
-    paddingBottom: 100, // Account for tab bar
+    paddingBottom: 100,
   },
   fieldContainer: { 
     marginBottom: 24,
@@ -371,6 +466,11 @@ const styles = StyleSheet.create({  container: {
     color: '#ef4444',
     fontWeight: 'bold',
   },
+  optional: {
+    color: '#9ca3af',
+    fontSize: 14,
+    fontWeight: 'normal',
+  },
   autoFail: {
     color: '#f59e0b',
     fontSize: 12,
@@ -384,6 +484,10 @@ const styles = StyleSheet.create({  container: {
     fontSize: 16,
     backgroundColor: '#ffffff',
     color: '#1f2937',
+  },
+  commentsInput: {
+    minHeight: 100,
+    textAlignVertical: 'top',
   },
   inputError: {
     borderColor: '#ef4444',

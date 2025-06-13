@@ -1,18 +1,9 @@
 import { MaterialIcons } from '@expo/vector-icons';
-import { router, Tabs } from 'expo-router';
+import { Tabs } from 'expo-router';
 import React from 'react';
-import { Text, TouchableOpacity } from 'react-native';
-import { supabase } from '../../lib/supabase';
 
 export default function TabLayout() {
-  const handleSignOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      console.error('Error signing out:', error.message);
-    } else {
-      router.replace('/auth/login');
-    }
-  };  return (
+  return (
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -45,10 +36,10 @@ export default function TabLayout() {
           shadowOpacity: 0.15,
           shadowRadius: 16,
           elevation: 12,
-          paddingBottom: 0,
-        }
+          paddingBottom: 0,        }
       }}
-    >      <Tabs.Screen
+    >
+      <Tabs.Screen
         name="index"
         options={{
           title: 'Home',
@@ -71,8 +62,7 @@ export default function TabLayout() {
               color={focused ? '#3b82f6' : color} 
               size={focused ? 26 : 24} 
             />
-          ),
-        }}
+          ),        }}
       />
       <Tabs.Screen
         name="profile"
@@ -84,14 +74,6 @@ export default function TabLayout() {
               color={focused ? '#3b82f6' : color} 
               size={focused ? 26 : 24} 
             />
-          ),
-          headerRight: () => (
-            <TouchableOpacity
-              onPress={handleSignOut}
-              style={{ marginRight: 15 }}
-            >
-              <Text style={{ color: '#0ea5e9', fontSize: 16 }}>Sign Out</Text>
-            </TouchableOpacity>
           ),
         }}
       />
