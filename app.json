@@ -33,6 +33,13 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "The app accesses your photos to let you upload images for audit documentation.",
+          "cameraPermission": "The app accesses your camera to let you take photos for audit documentation."
+        }
       ]
     ],
     "experiments": {
