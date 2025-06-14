@@ -36,7 +36,8 @@ export default function TabLayout() {
           shadowOpacity: 0.15,
           shadowRadius: 16,
           elevation: 12,
-          paddingBottom: 0,        }
+          paddingBottom: 0,
+        }
       }}
     >
       <Tabs.Screen
@@ -62,7 +63,21 @@ export default function TabLayout() {
               color={focused ? '#3b82f6' : color} 
               size={focused ? 26 : 24} 
             />
-          ),        }}
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="history"
+        options={{
+          title: 'History',
+          tabBarIcon: ({ color, size, focused }) => (
+            <MaterialIcons 
+              name="history" 
+              color={focused ? '#3b82f6' : color} 
+              size={focused ? 26 : 24} 
+            />
+          ),
+        }}
       />
       <Tabs.Screen
         name="profile"

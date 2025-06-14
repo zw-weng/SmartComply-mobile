@@ -21,12 +21,41 @@ const Audit = () => {
 
   const fetchCompliances = async () => {
     try {
-      const { data, error } = await supabase.from('compliance').select('*')
-      if (!error && data) {
+      // Check if user is authenticated before fetching data
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError) {
+        console.error('Session error:', sessionError);
+        return;
+      }
+      
+      if (!session) {
+        console.error('No active session - user not authenticated');
+        return;
+      }
+      
+      // Add timeout to prevent infinite loading
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Request timeout')), 10000)
+      );
+      
+      const supabasePromise = supabase.from('compliance').select('*');
+      
+      const { data, error } = await Promise.race([supabasePromise, timeoutPromise]) as any;
+      
+      if (error) {
+        console.error('Error fetching compliance records:', error);
+        return;
+      }
+      
+      if (data) {
         setCompliances(data as ComplianceRecord[])
       }
     } catch (error) {
       console.error('Error fetching compliances:', error)
+      if (error instanceof Error && error.message === 'Request timeout') {
+        console.error('Request timed out - possible network or database issue');
+      }
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -34,7 +63,7 @@ const Audit = () => {
   }
 
   useEffect(() => {
-    fetchCompliances()
+    fetchCompliances();
   }, [])
 
   const onRefresh = () => {

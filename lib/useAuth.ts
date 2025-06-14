@@ -21,9 +21,7 @@ export function useAuth(): UseAuthReturn {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [hasValidRole, setHasValidRole] = useState(false);
-
-  const signOut = async () => {
+  const [hasValidRole, setHasValidRole] = useState(false);  const signOut = async () => {
     try {
       await supabase.auth.signOut();
       setUser(null);
@@ -94,9 +92,7 @@ export function useAuth(): UseAuthReturn {
     return () => {
       subscription.unsubscribe();
     };
-  }, []);
-
-  return {
+  }, []);  return {
     user,
     profile,
     isLoading,
