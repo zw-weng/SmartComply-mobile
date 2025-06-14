@@ -451,10 +451,15 @@ export default function FormScreen() {
   }
 
   return (
-    <Screen style={styles.container}>
-      <BackButton 
-        onPress={() => router.push(`/audit/${id}`)}
-        title="Back to Forms"
+    <Screen style={styles.container}>      <BackButton 
+        onPress={() => {
+          if (isEditing || auditId) {
+            router.push('/(tabs)/history')
+          } else {
+            router.push(`/audit/${id}`)
+          }
+        }}
+        title={isEditing || auditId ? "Back to History" : "Back to Forms"}
         style={styles.backButton}
       />
       
