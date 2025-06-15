@@ -48,89 +48,69 @@ interface FormRecord {
 }
 
 export default function FormScreen() {
-  const { id, formId, auditId } = useLocalSearchParams<{ id: string; formId: string; auditId?: string }>()
+  const { id, formId, auditId, mode } = useLocalSearchParams<{ 
+    id: string; 
+    formId: string; 
+    auditId?: string;
+    mode?: 'view' | 'edit';
+  }>()
   const { user } = useAuth()
   const [schema, setSchema] = useState<FormRecord['form_schema'] | null>(null)
   const [values, setValues] = useState<Record<string, any>>({})
+  const [auditTitle, setAuditTitle] = useState('')
   const [userComments, setUserComments] = useState('')
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isEditing, setIsEditing] = useState(false)
+  const [isViewMode, setIsViewMode] = useState(mode === 'view')
   const [existingAuditId, setExistingAuditId] = useState<string | null>(null)
   const [uploadingImages, setUploadingImages] = useState<Record<string, boolean>>({})
-
   // Test storage bucket connection with improved diagnostics
   const testStorageBucket = async () => {
     try {
       console.log('=== STORAGE BUCKET TEST START ===')
       console.log('Testing storage bucket connection...')
       
-      // Try to list buckets first
-      console.log('Step 1: Attempting to list all buckets...')
-      const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets()
+      // Skip bucket listing and go directly to testing audit-images bucket access
+      console.log('Step 1: Testing direct access to audit-images bucket...')
       
-      if (bucketsError) {
-        console.log('Step 1 Failed: Cannot list buckets (expected with anon key)')
-        console.log('Buckets error:', bucketsError.message)
-        console.log('Step 2: Testing direct access to audit-images bucket...')
+      const { data: files, error: filesError } = await supabase.storage
+        .from('audit-images')
+        .list('', { limit: 1 })
+      
+      if (filesError) {
+        console.error('Step 1 Failed: Direct bucket access failed')
+        console.error('Files error details:', filesError)
+        console.error('Error message:', filesError.message)
         
-        // Test direct bucket access by listing files
-        const { data: files, error: filesError } = await supabase.storage
-          .from('audit-images')
-          .list('', { limit: 1 })
-        
-        if (filesError) {
-          console.error('Step 2 Failed: Direct bucket access failed')
-          console.error('Files error details:', filesError)
-          console.error('Error message:', filesError.message)
-          
-          if (filesError.message.includes('The resource was not found') || 
-              filesError.message.includes('Bucket not found')) {
-            console.log('DIAGNOSIS: Bucket does not exist')
-            Alert.alert(
-              'Bucket Not Found',
-              'The "audit-images" storage bucket does not exist.\n\n📝 Steps to create:\n\n1. Open Supabase Dashboard\n2. Go to Storage → Buckets\n3. Click "New bucket"\n4. Name: audit-images\n5. Make it Public\n6. Create bucket\n\nThen try uploading again.'
-            )
-          } else if (filesError.message.includes('access') || 
-                     filesError.message.includes('permission') ||
-                     filesError.message.includes('policy')) {
-            console.log('DIAGNOSIS: Permission/access issue')
-            Alert.alert(
-              'Bucket Access Denied',
-              'Cannot access the "audit-images" bucket.\n\n🔒 This might be due to:\n• Bucket is not public\n• Row Level Security (RLS) policies\n• Storage policies not configured\n\n📝 To fix:\n1. Go to Supabase Dashboard\n2. Storage → Buckets → audit-images\n3. Settings → Make sure "Public bucket" is enabled\n4. Try again'
-            )
-          } else {
-            console.log('DIAGNOSIS: Unknown error')
-            Alert.alert(
-              'Storage Connection Error',
-              `Unexpected error accessing storage:\n\n${filesError.message}\n\n🔧 Please check:\n• Internet connection\n• Supabase project status\n• Storage service status`
-            )
-          }
-          return false
+        if (filesError.message.includes('The resource was not found') || 
+            filesError.message.includes('Bucket not found')) {
+          console.log('DIAGNOSIS: Bucket does not exist')
+          Alert.alert(
+            'Bucket Not Found',
+            'The "audit-images" storage bucket does not exist.\n\nSteps to create:\n\n1. Open Supabase Dashboard\n2. Go to Storage → Buckets\n3. Click "New bucket"\n4. Name: audit-images\n5. Make it Public\n6. Create bucket\n\nThen try uploading again.'
+          )
+        } else if (filesError.message.includes('access') || 
+                   filesError.message.includes('permission') ||
+                   filesError.message.includes('policy')) {
+          console.log('DIAGNOSIS: Permission/access issue')
+          Alert.alert(
+            'Bucket Access Denied',
+            'Cannot access the "audit-images" bucket.\n\nThis might be due to:\n• Bucket is not public\n• Row Level Security (RLS) policies\n• Storage policies not configured\n\nTo fix:\n1. Go to Supabase Dashboard\n2. Storage → Buckets → audit-images\n3. Settings → Make sure "Public bucket" is enabled\n4. Try again'
+          )
+        } else {
+          console.log('DIAGNOSIS: Unknown error')
+          Alert.alert(
+            'Storage Connection Error',
+            `Unexpected error accessing storage:\n\n${filesError.message}\n\nPlease check:\n• Internet connection\n• Supabase project status\n• Storage service status`
+          )
         }
-        
-        console.log('Step 2 Success: audit-images bucket is accessible via direct access!')
-        console.log('Files in bucket (first few):', files?.slice(0, 3))
-        return true
-      }
-      
-      // If we can list buckets, check if audit-images exists
-      console.log('Step 1 Success: Buckets listed successfully')
-      console.log('Available buckets:', buckets?.map(b => b.name))
-      const auditBucket = buckets?.find(bucket => bucket.name === 'audit-images')
-      
-      if (!auditBucket) {
-        console.error('Step 3 Failed: audit-images bucket not found in bucket list!')
-        console.log('Available bucket names:', buckets?.map(b => b.name))
-        Alert.alert(
-          'Bucket Missing from List',
-          'The "audit-images" bucket was not found.\n\n📝 Please create it:\n\n1. Supabase Dashboard\n2. Storage → Buckets\n3. New bucket: "audit-images"\n4. Make it Public\n5. Create bucket'
-        )
         return false
       }
       
-      console.log('Step 3 Success: audit-images bucket found in list:', auditBucket)
+      console.log('Step 1 Success: audit-images bucket is accessible via direct access!')
+      console.log('Files in bucket (first few):', files?.slice(0, 3))
       console.log('=== STORAGE BUCKET TEST COMPLETE - SUCCESS ===')
       return true
       
@@ -142,11 +122,11 @@ export default function FormScreen() {
       
       Alert.alert(
         'Storage Test Failed',
-        `An unexpected error occurred:\n\n${errorMessage}\n\n🔧 Please check:\n• Internet connection\n• Supabase configuration\n• Project status`
+        `An unexpected error occurred:\n\n${errorMessage}\n\nPlease check:\n• Internet connection\n• Supabase configuration\n• Project status`
       )
       return false
     }
-  }  // Image upload function
+  }// Image upload function
   const uploadImageToSupabase = async (fieldId: string, imageUri: string): Promise<string> => {
     try {
       console.log('=== IMAGE UPLOAD START ===')
@@ -159,16 +139,8 @@ export default function FormScreen() {
       if (!bucketExists) {
         throw new Error('Storage bucket not available. Please check Supabase configuration.')
       }
-      console.log('Step 1 Success: Storage bucket OK')
-        // Convert image to blob
-      console.log('Step 2: Converting image to blob...')
-      const response = await fetch(imageUri)
-      if (!response.ok) {
-        throw new Error(`Failed to fetch image: ${response.statusText}`)
-      }
-      
-      const blob = await response.blob()
-      console.log('Step 2 Success: Image blob created, size:', blob.size, 'type:', blob.type)
+      console.log('Step 1 Success: Storage bucket OK')      // Convert image for upload using Expo FileSystem (React Native compatible)
+      console.log('Step 2: Reading image file...')
       
       // Generate unique filename
       const fileExt = imageUri.split('.').pop() || 'jpg'
@@ -177,13 +149,25 @@ export default function FormScreen() {
       
       console.log('Step 3: Uploading to Supabase Storage...')
       console.log('Upload path:', filePath)
-      console.log('Content type:', blob.type || 'image/jpeg')
+        // Use fetch to convert image to ArrayBuffer (recommended React Native/Expo approach)
+      console.log('Reading file with fetch (ArrayBuffer)...')
+      const response = await fetch(imageUri)
+      if (!response.ok) {
+        throw new Error(`Failed to read image: ${response.status}`)
+      }
       
-      // Upload to Supabase Storage
+      const arrayBuffer = await response.arrayBuffer()
+      console.log('Step 2 Success: Image read as ArrayBuffer, size:', arrayBuffer.byteLength, 'bytes')
+      
+      console.log('Uploading ArrayBuffer to Supabase...')
+      
+      // Determine MIME type
+      const mimeType = fileExt === 'png' ? 'image/png' : 'image/jpeg'
+        // Upload the ArrayBuffer to Supabase Storage
       const { data, error } = await supabase.storage
         .from('audit-images')
-        .upload(filePath, blob, {
-          contentType: blob.type || 'image/jpeg',
+        .upload(filePath, arrayBuffer, {
+          contentType: mimeType,
           upsert: false
         })
         if (error) {
@@ -365,17 +349,11 @@ export default function FormScreen() {
 
           if (!auditError && auditData) {
             setUserComments(auditData.comments || '')
-            
-            // Load existing responses from audit_data if available, otherwise use initial values
+            setAuditTitle(auditData.title || '')
+              // Load existing responses from audit_data if available, otherwise use initial values
             const existingResponses = auditData.audit_data || {}
             const loadedValues = { ...initial, ...existingResponses }
             setValues(loadedValues)
-            
-            Alert.alert(
-              'Edit Mode',
-              'You are editing an existing audit. Make your changes and resubmit.',
-              [{ text: 'OK' }]
-            )
           } else {
             Alert.alert('Error', 'Could not load existing audit data')
             setIsEditing(false)
@@ -401,9 +379,13 @@ export default function FormScreen() {
       setErrors((prev) => ({ ...prev, [fieldId]: '' }))
     }
   }
-
   const validateForm = () => {
     const newErrors: Record<string, string> = {}
+    
+    // Validate audit title - just check if it's not empty
+    if (!auditTitle.trim()) {
+      newErrors['auditTitle'] = 'Audit title is required'
+    }
     
     schema?.fields.forEach((field) => {
       if (field.required && (!values[field.id] || values[field.id] === '')) {
@@ -544,6 +526,7 @@ export default function FormScreen() {
         const updateResult = await supabase
           .from('audit')
           .update({
+            title: auditTitle.trim(),
             status: finalStatus,
             result: finalResult,
             marks: finalMarks,
@@ -564,6 +547,7 @@ export default function FormScreen() {
           .insert({
             form_id: parseInt(formId as string),
             user_id: user.id,
+            title: auditTitle.trim(),
             status: finalStatus,
             result: finalResult,
             marks: finalMarks,
@@ -573,8 +557,7 @@ export default function FormScreen() {
           })
           .select()
           .single()
-        
-        auditData = insertResult.data
+          auditData = insertResult.data
         auditError = insertResult.error
       }
 
@@ -586,7 +569,7 @@ export default function FormScreen() {
         `Form ${actionText} successfully!\n\nScore: ${finalMarks}/${scoreResult.maxScore}\nPercentage: ${finalPercentage.toFixed(1)}%\nResult: ${formatResultForDisplay(finalResult)}\nStatus: ${finalStatus.toUpperCase()}`, 
         [
           { 
-            text: 'Audit History', 
+            text: 'View Audit History', 
             onPress: () => {
               router.push('/(tabs)/history')
             }
@@ -612,7 +595,6 @@ export default function FormScreen() {
       setSubmitting(false)
     }
   }
-
   const renderField = (field: FieldDef) => {
     const value = values[field.id]
     const hasError = !!errors[field.id]
@@ -622,23 +604,33 @@ export default function FormScreen() {
       case 'textarea':
         return (
           <TextInput
-            style={[styles.input, hasError && styles.inputError]}
+            style={[
+              styles.input, 
+              hasError && styles.inputError,
+              isViewMode && styles.inputReadOnly
+            ]}
             placeholder={field.placeholder || ''}
             value={String(value || '')}
             onChangeText={(text) => handleChange(field.id, text)}
             multiline={field.type === 'textarea'}
             numberOfLines={field.type === 'textarea' ? 4 : 1}
+            editable={!isViewMode}
           />
         )
 
       case 'number':
         return (
           <TextInput
-            style={[styles.input, hasError && styles.inputError]}
+            style={[
+              styles.input, 
+              hasError && styles.inputError,
+              isViewMode && styles.inputReadOnly
+            ]}
             placeholder={field.placeholder || ''}
             keyboardType="numeric"
             value={String(value || '')}
             onChangeText={(text) => handleChange(field.id, Number(text) || 0)}
+            editable={!isViewMode}
           />
         )
 
@@ -646,18 +638,34 @@ export default function FormScreen() {
         return (
           <View style={styles.booleanContainer}>
             <Pressable
-              style={[styles.booleanOption, value === true && styles.booleanSelected]}
-              onPress={() => handleChange(field.id, true)}
+              style={[
+                styles.booleanOption, 
+                value === true && styles.booleanSelected,
+                isViewMode && styles.booleanDisabled
+              ]}
+              onPress={() => !isViewMode && handleChange(field.id, true)}
             >
-              <Text style={[styles.booleanText, value === true && styles.booleanTextSelected]}>
+              <Text style={[
+                styles.booleanText, 
+                value === true && styles.booleanTextSelected,
+                isViewMode && styles.booleanTextDisabled
+              ]}>
                 Yes
               </Text>
             </Pressable>
             <Pressable
-              style={[styles.booleanOption, value === false && styles.booleanSelected]}
-              onPress={() => handleChange(field.id, false)}
+              style={[
+                styles.booleanOption, 
+                value === false && styles.booleanSelected,
+                isViewMode && styles.booleanDisabled
+              ]}
+              onPress={() => !isViewMode && handleChange(field.id, false)}
             >
-              <Text style={[styles.booleanText, value === false && styles.booleanTextSelected]}>
+              <Text style={[
+                styles.booleanText, 
+                value === false && styles.booleanTextSelected,
+                isViewMode && styles.booleanTextDisabled
+              ]}>
                 No
               </Text>
             </Pressable>
@@ -671,13 +679,17 @@ export default function FormScreen() {
             points: 0, 
             isFailOption: false 
           })) : [])
-        
-        return (
-          <View style={[styles.pickerContainer, hasError && styles.inputError]}>
+          return (
+          <View style={[
+            styles.pickerContainer, 
+            hasError && styles.inputError,
+            isViewMode && styles.inputReadOnly
+          ]}>
             <Picker
               selectedValue={value}
-              onValueChange={(itemValue) => handleChange(field.id, String(itemValue))}
+              onValueChange={(itemValue) => !isViewMode && handleChange(field.id, String(itemValue))}
               style={styles.picker}
+              enabled={!isViewMode}
             >
               <Picker.Item 
                 label={field.placeholder || "Select an option..."} 
@@ -686,11 +698,13 @@ export default function FormScreen() {
                 color="#999"
               />
               {options.map((option, index) => (
-                <Picker.Item                  key={index}
+                <Picker.Item
+                  key={index}
                   label={String(option.value)}
                   value={String(option.value)}
                   color={option.isFailOption ? '#ef4444' : '#000'}
-                />              ))}
+                />
+              ))}
             </Picker>
           </View>
         )
@@ -706,29 +720,35 @@ export default function FormScreen() {
                     <MaterialIcons name="check-circle" size={20} color="#10b981" />
                     <Text style={styles.imageUploadedText}>Image uploaded</Text>
                   </View>
+                </View>                <View style={styles.imageActions}>
+                  {!isViewMode && (
+                    <>
+                      <Pressable 
+                        style={styles.changeImageButton}
+                        onPress={() => pickImage(field.id)}
+                      >
+                        <MaterialIcons name="edit" size={16} color="#3b82f6" />
+                        <Text style={styles.changeImageText}>Change</Text>
+                      </Pressable>
+                      <Pressable 
+                        style={styles.removeImageButton}
+                        onPress={() => handleChange(field.id, '')}
+                      >
+                        <MaterialIcons name="delete" size={16} color="#ef4444" />
+                        <Text style={styles.removeImageText}>Remove</Text>
+                      </Pressable>
+                    </>
+                  )}
                 </View>
-                <View style={styles.imageActions}>
-                  <Pressable 
-                    style={styles.changeImageButton}
-                    onPress={() => pickImage(field.id)}
-                  >
-                    <MaterialIcons name="edit" size={16} color="#3b82f6" />
-                    <Text style={styles.changeImageText}>Change</Text>
-                  </Pressable>
-                  <Pressable 
-                    style={styles.removeImageButton}
-                    onPress={() => handleChange(field.id, '')}
-                  >
-                    <MaterialIcons name="delete" size={16} color="#ef4444" />
-                    <Text style={styles.removeImageText}>Remove</Text>
-                  </Pressable>
-                </View>
-              </View>
-            ) : (
+              </View>            ) : (
               <Pressable 
-                style={[styles.uploadArea, hasError && styles.uploadAreaError]}
-                onPress={() => pickImage(field.id)}
-                disabled={uploadingImages[field.id]}
+                style={[
+                  styles.uploadArea, 
+                  hasError && styles.uploadAreaError,
+                  isViewMode && styles.uploadAreaDisabled
+                ]}
+                onPress={() => !isViewMode && pickImage(field.id)}
+                disabled={uploadingImages[field.id] || isViewMode}
               >
                 {uploadingImages[field.id] ? (
                   <View style={styles.uploadingContainer}>
@@ -793,19 +813,26 @@ export default function FormScreen() {
         title={isEditing || auditId ? "Back to History" : "Back to Forms"}
         style={styles.backButton}
       />
-      
-      <View style={styles.header}>
+        <View style={styles.header}>
         <View style={styles.formTitleCard}>
-          <Text style={styles.title}>
-            {isEditing && '✏️ Editing: '}{schema.title}
-          </Text>
-          {schema.description && (
-            <Text style={styles.description}>{schema.description}</Text>
+          {(isViewMode || isEditing) && (
+            <View style={styles.modeIndicator}>
+              <Text style={[
+                styles.modeText, 
+                isViewMode ? styles.viewModeTag : styles.editModeTag
+              ]}>
+                {isViewMode ? 'READ ONLY' : 'EDITING'}
+              </Text>
+            </View>
           )}
-          {isEditing && (
+          <Text style={styles.title}>
+            {schema.title}
+          </Text>          {schema.description && (
+            <Text style={styles.description}>{schema.description}</Text>
+          )}          {isEditing && !isViewMode && (
             <View style={styles.editingNotice}>
               <Text style={styles.editingText}>
-                📝 You are editing an existing audit. Make changes and resubmit.
+                You are editing an existing audit. Make changes and resubmit.
               </Text>
             </View>
           )}
@@ -817,15 +844,49 @@ export default function FormScreen() {
         </View>
       </View>
 
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView} 
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* Audit Title Field */}
+        <View style={styles.fieldCard}>
+          <View style={styles.fieldHeader}>
+            <Text style={styles.fieldNumber}>1.</Text>
+            <View style={styles.fieldTitleContainer}>              <Text style={styles.fieldLabel}>
+                Audit Title
+                <Text style={styles.required}> *</Text>
+              </Text>
+            </View>
+          </View>
+          
+          <View style={styles.fieldInputContainer}>
+            <TextInput
+              style={[
+                styles.input, 
+                errors['auditTitle'] && styles.inputError,
+                isViewMode && styles.inputReadOnly
+              ]}
+              placeholder="Enter audit title..."
+              value={auditTitle}
+              onChangeText={(text) => {
+                setAuditTitle(text)
+                if (errors['auditTitle']) {
+                  setErrors((prev) => ({ ...prev, auditTitle: '' }))
+                }
+              }}
+              editable={!isViewMode}
+            />
+            {errors['auditTitle'] && (
+              <Text style={styles.errorText}>{errors['auditTitle']}</Text>
+            )}
+          </View>        </View>
+
+        {/* Form Fields */}
         {schema.fields.map((field, index) => (
           <View key={field.id} style={styles.fieldCard}>
             <View style={styles.fieldHeader}>
-              <Text style={styles.fieldNumber}>{index + 1}.</Text>
+              <Text style={styles.fieldNumber}>{index + 2}.</Text>
               <View style={styles.fieldTitleContainer}>
                 <Text style={styles.fieldLabel}>
                   {field.label}
@@ -849,7 +910,7 @@ export default function FormScreen() {
         
         <View style={styles.fieldCard}>
           <View style={styles.fieldHeader}>
-            <Text style={styles.fieldNumber}>{schema.fields.length + 1}.</Text>
+            <Text style={styles.fieldNumber}>{schema.fields.length + 2}.</Text>
             <View style={styles.fieldTitleContainer}>
               <Text style={styles.fieldLabel}>
                 Comments
@@ -857,34 +918,56 @@ export default function FormScreen() {
               </Text>
               <Text style={styles.fieldDescription}>
                 Add any additional comments, observations, or notes about this audit
-              </Text>
-            </View>
+              </Text>            </View>
           </View>
+          
           <View style={styles.fieldInputContainer}>
             <TextInput
-              style={[styles.input, styles.commentsInput]}
+              style={[
+                styles.input, 
+                styles.commentsInput,
+                isViewMode && styles.inputReadOnly
+              ]}
               placeholder="Add any additional comments or observations..."
               value={userComments}
               onChangeText={setUserComments}
               multiline={true}
               numberOfLines={4}
               textAlignVertical="top"
-            />
-          </View>
+              editable={!isViewMode}
+            />          </View>
         </View>
       </ScrollView>
       
-      <View style={styles.submitContainer}>
+      {!isViewMode && (
+        <View style={styles.submitContainer}>
+          <Pressable 
+            style={[styles.submitButton, submitting && styles.submitButtonDisabled]} 
+            onPress={handleSubmit}
+            disabled={submitting}
+          >
+            <Text style={styles.submitButtonText}>
+              {submitting ? (isEditing ? 'Updating...' : 'Submitting...') : (isEditing ? 'Update Audit' : 'Submit Form')}
+            </Text>
+          </Pressable>        </View>
+      )}
+
+      {/* Floating Edit Button - only show in view mode */}
+      {isViewMode && (
         <Pressable 
-          style={[styles.submitButton, submitting && styles.submitButtonDisabled]} 
-          onPress={handleSubmit}
-          disabled={submitting}
+          style={styles.floatingEditButton}
+          onPress={() => {
+            setIsViewMode(false)
+            Alert.alert(
+              'Edit Mode',
+              'You can now edit this audit. Make your changes and resubmit when ready.',
+              [{ text: 'OK' }]
+            )
+          }}
         >
-          <Text style={styles.submitButtonText}>
-            {submitting ? (isEditing ? 'Updating...' : 'Submitting...') : (isEditing ? 'Update Audit' : 'Submit Form')}
-          </Text>
+          <MaterialIcons name="edit" size={24} color="#ffffff" />
         </Pressable>
-      </View>
+      )}
     </Screen>
   )
 }
@@ -1014,8 +1097,7 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     fontSize: 14,
     fontWeight: 'normal',
-  },
-  input: {
+  },  input: {
     borderWidth: 1,
     borderColor: '#d1d5db',
     borderRadius: 8,
@@ -1023,6 +1105,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: '#ffffff',
     color: '#1f2937',
+  },
+
+  inputReadOnly: {
+    backgroundColor: '#f9fafb',
+    color: '#6b7280',
+    borderColor: '#e5e7eb',
   },
   commentsInput: {
     minHeight: 100,
@@ -1054,9 +1142,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     color: '#6b7280',
-  },
-  booleanTextSelected: {
+  },  booleanTextSelected: {
     color: '#3b82f6',
+  },
+
+  booleanDisabled: {
+    backgroundColor: '#f9fafb',
+    borderColor: '#e5e7eb',
+  },
+
+  booleanTextDisabled: {
+    color: '#9ca3af',
   },
   pickerContainer: {
     borderWidth: 1,
@@ -1134,10 +1230,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 160,
-  },
-  uploadAreaError: {
+  },  uploadAreaError: {
     borderColor: '#ef4444',
     backgroundColor: '#fef2f2',
+  },
+
+  uploadAreaDisabled: {
+    backgroundColor: '#f9fafb',
+    borderColor: '#e5e7eb',
+    opacity: 0.6,
   },
   uploadContent: {
     alignItems: 'center',
@@ -1286,10 +1387,55 @@ const styles = StyleSheet.create({
   },
   uploadingContent: {
     flex: 1,
-  },
-  uploadingSubtext: {
+  },  uploadingSubtext: {
     fontSize: 12,
     color: '#6b7280',
     marginTop: 2,
+  },
+
+  // Clean mode indicator styles
+  modeIndicator: {
+    alignSelf: 'flex-start',
+    marginBottom: 12,
+  },
+
+  modeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+
+  viewModeTag: {
+    backgroundColor: '#eff6ff',
+    color: '#1e40af',
+  },
+
+  editModeTag: {
+    backgroundColor: '#fef3c7',
+    color: '#92400e',
+  },
+
+  // Floating edit button
+  floatingEditButton: {
+    position: 'absolute',
+    right: 24,
+    bottom: 100,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#3b82f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
 })

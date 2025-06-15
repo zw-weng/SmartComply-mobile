@@ -11,6 +11,7 @@ import {
     RefreshControl,
     StyleSheet,
     Text,
+    TextInput,
     View,
 } from 'react-native'
 import Screen from '../../components/Screen'
@@ -20,6 +21,7 @@ import { useAuth } from '../../lib/useAuth'
 interface AuditRecord {
   id: number
   form_id: number
+  title: string
   status: string
   result: string
   marks: number
@@ -47,6 +49,8 @@ export default function HistoryScreen() {
   const [refreshing, setRefreshing] = useState(false)
   const [selectedAudit, setSelectedAudit] = useState<AuditRecord | null>(null)
   const [showOptionsModal, setShowOptionsModal] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'complete'>('all')
     const fetchAudits = async () => {
     if (!user?.id) return
 
@@ -139,7 +143,6 @@ export default function HistoryScreen() {
       default: return '#f3f4f6'
     }
   }
-
   const getResultIcon = (result: string) => {
     switch (result.toLowerCase()) {
       case 'pass':
@@ -148,6 +151,34 @@ export default function HistoryScreen() {
       case 'failed': return 'cancel'
       default: return 'help'
     }
+  }
+
+  const getStatusColor = (status: string) => {
+    const normalizedStatus = status.toLowerCase()
+    if (normalizedStatus.includes('completed') || normalizedStatus.includes('done')) {
+      return '#10b981'
+    } else if (normalizedStatus.includes('in_progress') || normalizedStatus.includes('progress')) {
+      return '#f59e0b'
+    } else if (normalizedStatus.includes('pending') || normalizedStatus.includes('draft')) {
+      return '#3b82f6'
+    } else if (normalizedStatus.includes('failed') || normalizedStatus.includes('error')) {
+      return '#ef4444'
+    }
+    return '#6b7280'
+  }
+
+  const getStatusBackgroundColor = (status: string) => {
+    const normalizedStatus = status.toLowerCase()
+    if (normalizedStatus.includes('completed') || normalizedStatus.includes('done')) {
+      return '#d1fae5'
+    } else if (normalizedStatus.includes('in_progress') || normalizedStatus.includes('progress')) {
+      return '#fef3c7'
+    } else if (normalizedStatus.includes('pending') || normalizedStatus.includes('draft')) {
+      return '#dbeafe'
+    } else if (normalizedStatus.includes('failed') || normalizedStatus.includes('error')) {
+      return '#fee2e2'
+    }
+    return '#f3f4f6'
   }
 
   const getScoreGradient = (percentage: number) => {
@@ -204,23 +235,16 @@ export default function HistoryScreen() {
     }
     return { isEdited: false }
   }
-  
-  const handleAuditPress = (audit: AuditRecord) => {
+    const handleAuditPress = (audit: AuditRecord) => {
     setSelectedAudit(audit)
     setShowOptionsModal(true)
-  }
-
-  const handleEditAudit = () => {
-    if (selectedAudit) {
-      setShowOptionsModal(false)
-      router.push(`/audit/form/${selectedAudit.form_id}?auditId=${selectedAudit.id}`)
-    }
   }
 
   const handleViewDetails = () => {
     if (selectedAudit) {
       setShowOptionsModal(false)
-      showAuditDetails(selectedAudit)
+      // Navigate to form in view mode
+      router.push(`/audit/form/${selectedAudit.form_id}?auditId=${selectedAudit.id}&mode=view`)
     }
   }
   const handleCloseModal = () => {
@@ -233,15 +257,13 @@ export default function HistoryScreen() {
     const timeInfo = audit.last_edit_at 
       ? `\nLast Edit: ${formatFullDate(lastActivityDate)}\nOriginal Creation: ${formatFullDate(audit.created_at)}`
       : `\nCreated: ${formatFullDate(audit.created_at)}`
-    
-    Alert.alert(
+      Alert.alert(
       'Audit Details',
-      `Form: ${audit.form?.form_schema?.title || 'Unknown Form'}\nAuditor: ${audit.profiles?.full_name || 'Unknown User'}\nResult: ${audit.result.toUpperCase()}\nScore: ${audit.marks} (${audit.percentage.toFixed(1)}%)\nStatus: ${audit.status.toUpperCase()}${timeInfo}${audit.comments ? `\nComments: ${audit.comments}` : ''}`,
+      `Title: ${audit.title || 'Untitled Audit'}\nForm: ${audit.form?.form_schema?.title || 'Unknown Form'}\nAuditor: ${audit.profiles?.full_name || 'Unknown User'}\nResult: ${audit.result.toUpperCase()}\nScore: ${audit.marks} (${audit.percentage.toFixed(1)}%)\nStatus: ${audit.status.toUpperCase()}${timeInfo}${audit.comments ? `\nComments: ${audit.comments}` : ''}`,
       [{ text: 'Close', style: 'cancel' }]
     )
   }
-  
-  const renderAuditItem = ({ item }: { item: AuditRecord }) => {
+    const renderAuditItem = ({ item }: { item: AuditRecord }) => {
     const editStatus = getEditStatus(item)
     const resultColor = getResultColor(item.result)
     const resultBgColor = getResultBackgroundColor(item.result)
@@ -252,33 +274,45 @@ export default function HistoryScreen() {
         style={styles.auditCard}
         onPress={() => handleAuditPress(item)}
       >
-        {/* Audit Reference Header */}        <View style={styles.auditRefHeader}>
+        {/* Audit Reference Header */}
+        <View style={styles.auditRefHeader}>
           <View style={styles.refLeftSection}>
             <Text style={styles.auditRefNumber}>{auditRef}</Text>
           </View>
-          <View style={[styles.resultBadge, { backgroundColor: resultBgColor }]}>
-            <MaterialIcons 
-              name={getResultIcon(item.result) as any}
-              size={18}
-              color={resultColor}
-            />
-            <Text style={[styles.resultText, { color: resultColor }]}>
-              {item.result.toUpperCase()}
-            </Text>
+          
+          <View style={styles.badgesContainer}>
+            <View style={[styles.resultBadge, { backgroundColor: resultBgColor }]}>
+              <MaterialIcons 
+                name={getResultIcon(item.result) as any}
+                size={18}
+                color={resultColor}
+              />
+              <Text style={[styles.resultText, { color: resultColor }]}>
+                {item.result.toUpperCase()}
+              </Text>
+            </View>
+            <View style={[
+              styles.resultBadge, 
+              { backgroundColor: getStatusBackgroundColor(item.status) }
+            ]}>              <Text style={[
+                styles.resultText, 
+                { color: getStatusColor(item.status) }
+              ]}>
+                {item.status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+              </Text>
+            </View>
           </View>
         </View>
-
-        {/* Form Information */}
+        
+        {/* Audit Information */}
         <View style={styles.cardHeader}>
           <View style={styles.formInfo}>
             <Text style={styles.formTitle} numberOfLines={2}>
-              {item.form?.form_schema?.title || 'Unknown Form'}
+              {item.title || 'Untitled Audit'}
             </Text>
-            {item.form?.form_schema?.description && (
-              <Text style={styles.formDescription} numberOfLines={1}>
-                {item.form.form_schema.description}
-              </Text>
-            )}
+            <Text style={styles.formDescription} numberOfLines={1}>
+              Form: {item.form?.form_schema?.title || 'Unknown Form'}
+            </Text>
           </View>
         </View>
 
@@ -306,18 +340,7 @@ export default function HistoryScreen() {
             <Text style={[styles.percentageText, { color: resultColor }]}>
               {item.percentage.toFixed(0)}%
             </Text>
-          </View>
-        </View>
-
-        {/* Comments section */}
-        {item.comments && (
-          <View style={styles.commentsSection}>
-            <MaterialIcons name="comment" size={16} color="#6b7280" />
-            <Text style={styles.commentsText} numberOfLines={2}>
-              {item.comments}
-            </Text>
-          </View>
-        )}
+          </View>        </View>
 
         {/* Enhanced Footer with more details */}
         <View style={styles.cardFooter}>
@@ -357,6 +380,36 @@ export default function HistoryScreen() {
     )
   }
 
+  // Filter audits based on search query and status filter
+  const getFilteredAudits = () => {
+    let filtered = audits
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase()
+      filtered = filtered.filter(audit => {
+        const auditTitle = audit.title?.toLowerCase() || ''
+        const formTitle = audit.form?.form_schema?.title?.toLowerCase() || ''
+        return auditTitle.includes(query) || formTitle.includes(query)
+      })
+    }
+
+    // Apply status filter
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(audit => {
+        const status = audit.status.toLowerCase()
+        if (statusFilter === 'pending') {
+          return status.includes('pending') || status.includes('draft') || status.includes('in_progress')
+        } else if (statusFilter === 'complete') {
+          return status.includes('completed') || status.includes('done')
+        }
+        return true
+      })
+    }
+
+    return filtered
+  }
+
   if (loading) {
     return (
       <Screen style={styles.container}>
@@ -371,39 +424,73 @@ export default function HistoryScreen() {
     )
   }
   return (
-    <Screen style={styles.container}>
-      <View style={styles.header}>
+    <Screen style={styles.container}>      <View style={styles.header}>
         <Text style={styles.title}>Audit History</Text>
         <Text style={styles.subtitle}>
-          {audits.length} audit{audits.length !== 1 ? 's' : ''} completed
+          {getFilteredAudits().length} of {audits.length} audit{audits.length !== 1 ? 's' : ''}
         </Text>
         
-        {/* Summary Stats */}
-        {audits.length > 0 && (
-          <View style={styles.statsContainer}>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>
-                {audits.filter(a => a.result.toLowerCase().includes('pass')).length}
-              </Text>
-              <Text style={[styles.statLabel, { color: '#10b981' }]}>Passed</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>
-                {audits.filter(a => a.result.toLowerCase().includes('fail')).length}
-              </Text>
-              <Text style={[styles.statLabel, { color: '#ef4444' }]}>Failed</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>
-                {audits.length > 0 ? 
-                  Math.round(audits.reduce((sum, a) => sum + a.percentage, 0) / audits.length) : 0}%
-              </Text>
-              <Text style={styles.statLabel}>Avg Score</Text>
-            </View>
+        {/* Search and Filter Section */}
+        <View style={styles.searchContainer}>
+          <View style={styles.searchInputContainer}>
+            <MaterialIcons name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search by audit title or form type..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              returnKeyType="search"
+            />
+            {searchQuery.length > 0 && (
+              <Pressable 
+                onPress={() => setSearchQuery('')}
+                style={styles.clearButton}
+              >
+                <MaterialIcons name="clear" size={18} color="#9ca3af" />
+              </Pressable>
+            )}
           </View>
-        )}
+          
+          <View style={styles.filterContainer}>
+            <Pressable 
+              style={[
+                styles.filterButton, 
+                statusFilter === 'all' && styles.filterButtonActive
+              ]}
+              onPress={() => setStatusFilter('all')}
+            >
+              <Text style={[
+                styles.filterText,
+                statusFilter === 'all' && styles.filterTextActive
+              ]}>All</Text>
+            </Pressable>
+            
+            <Pressable 
+              style={[
+                styles.filterButton, 
+                statusFilter === 'pending' && styles.filterButtonActive
+              ]}
+              onPress={() => setStatusFilter('pending')}
+            >
+              <Text style={[
+                styles.filterText,
+                statusFilter === 'pending' && styles.filterTextActive
+              ]}>Pending</Text>
+            </Pressable>
+            
+            <Pressable 
+              style={[
+                styles.filterButton, 
+                statusFilter === 'complete' && styles.filterButtonActive
+              ]}
+              onPress={() => setStatusFilter('complete')}
+            >              <Text style={[
+                styles.filterText,
+                statusFilter === 'complete' && styles.filterTextActive
+              ]}>Complete</Text>
+            </Pressable>
+          </View>
+        </View>
       </View>
 
       {audits.length === 0 ? (
@@ -420,9 +507,25 @@ export default function HistoryScreen() {
             <Text style={styles.auditButtonText}>Start Audit</Text>
           </Pressable>
         </View>
+      ) : getFilteredAudits().length === 0 ? (        <View style={styles.emptyContainer}>
+          <MaterialIcons name="filter-list-off" size={64} color="#d1d5db" />
+          <Text style={styles.emptyTitle}>No Results Found</Text>
+          <Text style={styles.emptyText}>
+            Try adjusting your search or filter criteria
+          </Text>
+          <Pressable 
+            style={styles.auditButton}
+            onPress={() => {
+              setSearchQuery('')
+              setStatusFilter('all')
+            }}
+          >
+            <Text style={styles.auditButtonText}>Clear Filters</Text>
+          </Pressable>
+        </View>
       ) : (
         <FlatList
-          data={audits}
+          data={getFilteredAudits()}
           renderItem={renderAuditItem}
           keyExtractor={(item) => item.id.toString()}
           refreshControl={
@@ -434,117 +537,148 @@ export default function HistoryScreen() {
 
       {/* Custom Options Modal */}
       <Modal
-        animationType="fade"
-        transparent={true}
-        visible={showOptionsModal}
-        onRequestClose={handleCloseModal}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            {selectedAudit && (
-              <>
-                {/* Modal Header */}
-                <View style={styles.modalHeader}>
-                  <View style={styles.modalHeaderContent}>
-                    <MaterialIcons 
-                      name="assignment" 
-                      size={24} 
-                      color="#3b82f6" 
-                    />
-                    <Text style={styles.modalTitle}>Audit Options</Text>
-                  </View>
-                  <Pressable 
-                    onPress={handleCloseModal}
-                    style={styles.closeButton}
-                  >
-                    <MaterialIcons name="close" size={24} color="#6b7280" />
-                  </Pressable>
-                </View>                {/* Audit Summary */}
-                <View style={styles.auditSummary}>
-                  {/* Audit Reference */}                  <View style={styles.summaryRow}>
-                    <Text style={styles.auditRefNumber}>
-                      {generateAuditReference(selectedAudit.id)}
-                    </Text>
-                  </View>
-                  
-                  <Text style={styles.summaryTitle}>
-                    {selectedAudit.form?.form_schema?.title || 'Unknown Form'}
-                  </Text>
-                    <View style={styles.summaryRow}>
-                    <View style={styles.summaryItem}>
-                      <MaterialIcons name="person" size={16} color="#6b7280" />
-                      <Text style={styles.summaryText}>
-                        {selectedAudit.profiles?.full_name || 'Unknown User'}
-                      </Text>
-                    </View>
-                    <View style={styles.summaryItem}>
-                      <MaterialIcons name="schedule" size={16} color="#6b7280" />                      <Text style={styles.summaryText}>
-                        {selectedAudit.last_edit_at 
-                          ? `Last Edit: ${formatFullDate(selectedAudit.last_edit_at)}`
-                          : `Created: ${formatFullDate(selectedAudit.created_at)}`
-                        }
-                      </Text>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.scoreRow}>
-                    <View style={[
-                      styles.resultChip, 
-                      { backgroundColor: getResultBackgroundColor(selectedAudit.result) }
-                    ]}>
-                      <MaterialIcons 
-                        name={getResultIcon(selectedAudit.result) as any}
-                        size={16}
-                        color={getResultColor(selectedAudit.result)}
-                      />
-                      <Text style={[
-                        styles.resultChipText, 
-                        { color: getResultColor(selectedAudit.result) }
-                      ]}>
-                        {selectedAudit.result.toUpperCase()}
-                      </Text>
-                    </View>
-                    <Text style={styles.scoreText}>
-                      {selectedAudit.marks} ({selectedAudit.percentage.toFixed(1)}%)
-                    </Text>
-                  </View>
-                </View>
+  animationType="fade"
+  transparent={true}
+  visible={showOptionsModal}
+  onRequestClose={handleCloseModal}
+>
+  <View style={styles.modalOverlay}>
+    <View style={styles.modalContainer}>
+      {selectedAudit && (
+        <>
+          {/* Modal Header */}
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+              {generateAuditReference(selectedAudit.id)}
+            </Text>
+            <Pressable onPress={handleCloseModal} style={styles.closeButton}>
+              <MaterialIcons name="close" size={24} color="#6b7280" />
+            </Pressable>
+          </View>
 
-                {/* Action Buttons */}
-                <View style={styles.actionButtons}>
-                  <Pressable 
-                    style={[styles.actionButton, styles.viewButton]}
-                    onPress={handleViewDetails}
-                  >
-                    <MaterialIcons name="visibility" size={20} color="#3b82f6" />
-                    <Text style={[styles.actionButtonText, styles.viewButtonText]}>
-                      View Details
-                    </Text>
-                  </Pressable>
-
-                  <Pressable 
-                    style={[styles.actionButton, styles.editButton]}
-                    onPress={handleEditAudit}
-                  >
-                    <MaterialIcons name="edit" size={20} color="#ffffff" />
-                    <Text style={[styles.actionButtonText, styles.editButtonText]}>
-                      Edit
-                    </Text>
-                  </Pressable>
-                </View>
-
-                {/* Cancel Button */}
-                <Pressable 
-                  style={styles.cancelButton}
-                  onPress={handleCloseModal}
+          {/* Main Content */}
+          <View style={styles.modalContent}>
+            {/* Title and Status Row */}
+            <View style={styles.titleStatusRow}>
+              <View style={styles.titleContainer}>
+                <Text style={styles.auditTitle} numberOfLines={2}>
+                  {selectedAudit.title || 'Untitled Audit'}
+                </Text>
+                <Text style={styles.formName}>
+                  {selectedAudit.form?.form_schema?.title || 'Unknown Form'}
+                </Text>
+              </View>
+              <View style={styles.statusGroup}>
+                {/* Result Badge */}
+                <View
+                  style={[
+                    styles.statusChip,
+                    {
+                      backgroundColor: getResultBackgroundColor(selectedAudit.result),
+                    },
+                  ]}
                 >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
-                </Pressable>
-              </>
+                  <MaterialIcons
+                    name={getResultIcon(selectedAudit.result) as any}
+                    size={16}
+                    color={getResultColor(selectedAudit.result)}
+                  />
+                  <Text
+                    style={[
+                      styles.statusText,
+                      { color: getResultColor(selectedAudit.result) },
+                    ]}
+                  >
+                    {selectedAudit.result.toUpperCase()}
+                  </Text>
+                </View>
+
+                {/* Status Badge */}
+                <View
+                  style={[
+                    styles.statusChip,
+                    {
+                      backgroundColor: getStatusBackgroundColor(selectedAudit.status),
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.statusText,
+                      { color: getStatusColor(selectedAudit.status) },
+                    ]}
+                  >
+                    {selectedAudit.status.replace(/_/g, ' ').replace(/\b\w/g, (l) =>
+                      l.toUpperCase()
+                    )}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Score Section */}
+            <View style={styles.scoreCard}>
+              <View style={styles.scoreInfo}>
+                <Text style={styles.scoreNumber}>{selectedAudit.marks}</Text>
+                <Text style={styles.scorePercentage}>
+                  {selectedAudit.percentage.toFixed(1)}%
+                </Text>
+              </View>
+              <Text style={styles.scoreLabel}>Score</Text>
+            </View>
+
+            {/* Quick Details */}
+            <View style={styles.quickDetails}>
+              <View style={styles.detailItem}>
+                <MaterialIcons name="person" size={16} color="#6b7280" />
+                <Text style={styles.detailText}>
+                  {selectedAudit.profiles?.full_name || 'Unknown User'}
+                </Text>
+              </View>
+              <View style={styles.detailItem}>
+                <MaterialIcons name="schedule" size={16} color="#6b7280" />
+                <Text style={styles.detailText}>
+                  {formatDate(getLastActivityDate(selectedAudit))}
+                </Text>
+              </View>
+            </View>
+
+            {/* Comments Section (Conditional) */}
+            {selectedAudit.comments && (
+              <View style={styles.commentsSection}>
+                <View style={styles.commentsHeader}>
+                  <MaterialIcons name="comment" size={16} color="#6b7280" />
+                  <Text style={styles.commentsTitle}>Comments</Text>
+                </View>
+                <Text style={styles.commentsText}>
+                  {selectedAudit.comments}
+                </Text>
+              </View>
             )}
           </View>
-        </View>
-      </Modal>
+
+          {/* Action Buttons */}
+          <View style={styles.actionButtons}>
+            <Pressable
+              style={[styles.actionButton, styles.viewButton]}
+              onPress={handleViewDetails}
+            >
+              <MaterialIcons name="visibility" size={20} color="#ffffff" />
+              <Text style={[styles.actionButtonText, styles.viewButtonText]}>
+                View Audit
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* Cancel Button */}
+          <Pressable style={styles.cancelButton} onPress={handleCloseModal}>
+            <Text style={styles.cancelButtonText}>Cancel</Text>
+          </Pressable>
+        </>
+      )}
+    </View>
+  </View>
+</Modal>
     </Screen>
   )
 }
@@ -572,42 +706,7 @@ const styles = StyleSheet.create({
     color: '#64748b',
     marginBottom: 20,
   },
-  
-  // Stats section
-  statsContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#f8fafc',
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 8,
-  },
-  
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  
-  statValue: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#1e293b',
-    marginBottom: 4,
-  },
-  
-  statLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#64748b',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  
-  statDivider: {
-    width: 1,
-    backgroundColor: '#e2e8f0',
-    marginHorizontal: 16,
-  },
-  loadingContainer: {
+    loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
@@ -722,14 +821,13 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
   },
   
-  scoreDetails: {
-    flexDirection: 'row',
+  scoreDetails: {    flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
   },
   
-  scoreLabel: {
+  oldScoreLabel: {
     fontSize: 14,
     fontWeight: '600',
     color: '#475569',
@@ -761,13 +859,12 @@ const styles = StyleSheet.create({
   },
   
   percentageText: {
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 14,    fontWeight: '700',
     minWidth: 40,
     textAlign: 'right',
   },
   
-  commentsSection: {
+  oldCommentsSection: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     paddingHorizontal: 20,
@@ -775,7 +872,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   
-  commentsText: {
+  oldCommentsText: {
     flex: 1,
     fontSize: 14,
     color: '#475569',
@@ -936,32 +1033,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#1e293b',
-  },
-
-  actionButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
+  },  actionButtons: {
+    paddingHorizontal: 24,
+    paddingBottom: 24,
   },
 
   actionButton: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
+    paddingVertical: 16,
     borderRadius: 12,
     gap: 8,
   },
 
   viewButton: {
-    backgroundColor: '#eff6ff',
-    borderWidth: 1,
-    borderColor: '#3b82f6',
-  },
-
-  editButton: {
     backgroundColor: '#3b82f6',
   },
 
@@ -971,21 +1057,15 @@ const styles = StyleSheet.create({
   },
 
   viewButtonText: {
-    color: '#3b82f6',
-  },
-
-  editButtonText: {
     color: '#ffffff',
   },
-
   cancelButton: {
-    marginHorizontal: 20,
-    marginBottom: 20,
-    paddingVertical: 14,
+    marginHorizontal: 24,
+    marginBottom: 24,
+    paddingVertical: 12,
     alignItems: 'center',
-    backgroundColor: '#f8fafc',
-    borderRadius: 12,
   },
+  
   cancelButtonText: {
     fontSize: 16,
     fontWeight: '500',
@@ -1004,9 +1084,21 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
   },
-
   refLeftSection: {
     flex: 1,
+  },
+
+  badgesContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  statusBadgeCard: {
+    alignSelf: 'flex-start',
+    minHeight: 34, // Match result badge height (paddingVertical: 8 * 2 + fontSize)
+    paddingHorizontal: 12, // Match result badge padding
+    paddingVertical: 8, // Match result badge padding
+    borderRadius: 20, // Match result badge border radius
   },
 
   auditRefNumber: {
@@ -1026,10 +1118,240 @@ const styles = StyleSheet.create({
   timestampDetails: {
     flex: 1,
   },
-
   fullTimestampText: {
     fontSize: 11,
     color: '#9ca3af',
     marginTop: 1,
+  },
+
+  // Missing modal styles
+  formNameText: {
+    fontSize: 14,
+    color: '#64748b',
+    marginBottom: 16,
+  },
+
+  scoreResultRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 12,
+  },
+
+  scoreContainer: {
+    flex: 1,
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    padding: 12,
+    borderRadius: 8,
+  },
+
+  percentageContainer: {
+    flex: 1,
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    padding: 12,
+    borderRadius: 8,
+  },
+  additionalInfo: {
+    gap: 12,
+    marginTop: 8,
+  },  // Clean Modal Styles - Modern Mobile App Design
+  modalContent: {
+    padding: 24,
+  },
+  titleStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+    gap: 16,
+  },
+
+  titleContainer: {
+    flex: 1,
+  },
+
+  statusGroup: {
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+
+  statusBadgeComponent: {
+    alignSelf: 'flex-end',
+  },
+
+  auditTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginBottom: 4,
+    lineHeight: 24,
+  },
+
+  formName: {
+    fontSize: 14,
+    color: '#64748b',
+    fontWeight: '500',
+  },
+
+  statusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 6,
+    alignSelf: 'flex-start',
+  },
+
+  statusText: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+
+  scoreCard: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+
+  scoreInfo: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    marginBottom: 4,
+  },
+
+  scoreNumber: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#1e293b',
+  },
+
+  scorePercentage: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+
+  scoreLabel: {
+    fontSize: 14,
+    color: '#64748b',
+    fontWeight: '500',
+  },
+
+  quickDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+
+  detailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  detailText: {
+    fontSize: 14,
+    color: '#64748b',
+    fontWeight: '500',
+    flex: 1,
+  },
+
+  // Comments section styles
+  commentsSection: {
+    marginTop: 20,
+    padding: 16,
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+
+  commentsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+
+  commentsTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  commentsText: {
+    fontSize: 14,
+    color: '#64748b',
+    lineHeight: 20,
+  },
+
+  // Search and filter styles
+  searchContainer: {
+    marginTop: 16,
+    gap: 12,
+  },
+
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+
+  searchIcon: {
+    marginRight: 8,
+  },
+
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#374151',
+    paddingVertical: 8,
+  },
+
+  clearButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+
+  filterContainer: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+
+  filterButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+
+  filterButtonActive: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#3b82f6',
+  },
+
+  filterText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#6b7280',
+  },
+
+  filterTextActive: {
+    color: '#ffffff',
   },
 })
