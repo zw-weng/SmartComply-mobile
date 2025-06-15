@@ -16,7 +16,11 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.zwweng.smartcomply"
     },
     "web": {
       "bundler": "metro",
@@ -44,6 +48,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "5680740a-32c7-49d4-adad-fbd78c943905"
+      }
+    },
+    "owner": "zw-weng"
   }
 }
