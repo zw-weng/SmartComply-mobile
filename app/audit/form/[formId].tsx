@@ -27,7 +27,7 @@ type EnhancedOption = {
 
 type FieldDef = {
   id: string
-  type: 'text' | 'number' | 'boolean' | 'select' | 'textarea' | 'image'
+  type: 'text' | 'number' | 'boolean' | 'select' | 'textarea' | 'image' | 'section' | 'checkbox'
   label: string
   required?: boolean
   placeholder?: string
@@ -37,6 +37,7 @@ type FieldDef = {
   description?: string
   options?: string[]
   enhancedOptions?: EnhancedOption[]
+  isSection?: boolean
 }
 
 interface FormRecord {
@@ -67,7 +68,22 @@ export default function FormScreen() {
   const [existingAuditId, setExistingAuditId] = useState<string | null>(null)
   const [uploadingImages, setUploadingImages] = useState<Record<string, boolean>>({})
 
-  // Test storage bucket connection with improved diagnostics
+  // Sanitize schema to ensure strings
+  const sanitizeSchema = (schema: FormRecord['form_schema']) => {
+    return {
+      ...schema,
+      title: String(schema.title || ''),
+      description: schema.description ? String(schema.description) : undefined,
+      fields: schema.fields.map(field => ({
+        ...field,
+        label: String(field.label || ''),
+        description: field.description ? String(field.description) : undefined,
+        placeholder: field.placeholder ? String(field.placeholder) : undefined,
+      })),
+    }
+  }
+
+  // Test storage bucket connection
   const testStorageBucket = async () => {
     try {
       console.log('=== STORAGE BUCKET TEST START ===')
@@ -272,25 +288,22 @@ export default function FormScreen() {
       }
     } catch (error) {
       console.error('Gallery error:', error)
-      Alert.alert('Error', 'Failed to select image. Please try again.')    } finally {
+      Alert.alert('Error', 'Failed to select image. Please try again.')
+    } finally {
       setUploadingImages(prev => ({ ...prev, [fieldId]: false }))
     }
   }
 
   useEffect(() => {
-    if (!formId) return
-    
-    // Don't fetch data if user is not authenticated (prevents errors during sign out)
-    if (!user?.id) {
+    if (!formId || !user?.id) {
       setLoading(false)
       return
     }
 
-    let isMounted = true // Track if component is still mounted
+    let isMounted = true
 
     const fetchFormAndAudit = async () => {
       if (!isMounted) return
-      
       setLoading(true)
       try {
         const { data: formData, error: formError } = await supabase
@@ -299,16 +312,16 @@ export default function FormScreen() {
           .eq('id', formId)
           .single()
 
-        if (!isMounted) return // Exit if component unmounted
-        
+        if (!isMounted) return
         if (formError || !formData) {
           throw new Error('Failed to load form')
         }
 
-        setSchema(formData.form_schema as FormRecord['form_schema'])
+        const sanitizedSchema = sanitizeSchema(formData.form_schema as FormRecord['form_schema'])
+        setSchema(sanitizedSchema)
 
         const initial: Record<string, any> = {}
-        formData.form_schema.fields.forEach((field: FieldDef) => {
+        sanitizedSchema.fields.forEach((field: FieldDef) => {
           if (field.type === 'boolean') {
             initial[field.id] = false
           } else if (field.type === 'select') {
@@ -338,18 +351,15 @@ export default function FormScreen() {
             Alert.alert('Error', 'Could not load existing audit data')
             setIsEditing(false)
             setExistingAuditId(null)
-          }        } else {
+          }
+        } else {
           setValues(initial)
         }
       } catch (error) {
         console.error('Error fetching data:', error)
-        
-        // Don't show error alerts if user is being logged out
         if (user?.id) {
-          // Check if it's an authentication error
           const errorMessage = error instanceof Error ? error.message : 'Unknown error'
           if (errorMessage.includes('auth') || errorMessage.includes('JWT')) {
-            // Silent fail for auth errors during logout
             console.log('Authentication error during logout, ignoring...')
           } else {
             Alert.alert('Error', 'Failed to load form')
@@ -357,11 +367,10 @@ export default function FormScreen() {
         }
       } finally {
         setLoading(false)
-      }    }
+      }
+    }
 
     fetchFormAndAudit()
-    
-    // Cleanup function to prevent state updates after unmount
     return () => {
       isMounted = false
     }
@@ -444,6 +453,10 @@ export default function FormScreen() {
     let totalScore = 0
     let maxScore = 0
     schema.fields.forEach(field => {
+      if (field.type === 'section' || field.isSection) {
+        return
+      }
+
       const userValue = values[field.id]
       const fieldWeight = field.weight || field.weightage || 1
 
@@ -454,7 +467,7 @@ export default function FormScreen() {
         }
         const maxPoints = Math.max(...field.enhancedOptions.map(opt => opt.points))
         maxScore += maxPoints * fieldWeight
-      } else if (field.type === 'boolean' && userValue !== undefined) {
+      } else if ((field.type === 'boolean' || field.type === 'checkbox') && userValue !== undefined) {
         const points = userValue === true ? 1 : 0
         totalScore += points * fieldWeight
         maxScore += 1 * fieldWeight
@@ -548,7 +561,7 @@ export default function FormScreen() {
           .single()
 
         auditData = insertResult.data
-        auditError = insertResult.error
+        auditError = updateResult.error
       }
 
       if (auditError) throw auditError
@@ -585,9 +598,9 @@ export default function FormScreen() {
   }
 
   const renderField = (field: FieldDef) => {
+    console.log(`Rendering field: ${field.id}, type: ${field.type}, label: ${field.label}, value: ${values[field.id]}`)
     const value = values[field.id]
     const hasError = !!errors[field.id]
-    console.log(`Rendering field: ${field.id}, type: ${field.type}, value:`, value) // Log field data
 
     switch (field.type) {
       case 'text':
@@ -669,9 +682,8 @@ export default function FormScreen() {
             points: 0,
             isFailOption: false
           })) : [])
-        console.log(`Select field options for ${field.id}:`, options) // Log options
+        console.log(`Select field options for ${field.id}:`, options)
 
-        // Validate options to prevent rendering issues
         const validOptions = options.filter(opt => typeof opt.value === 'string' && opt.value.trim() !== '')
         if (validOptions.length === 0) {
           return <Text style={styles.errorText}>No valid options available for this field</Text>
@@ -689,7 +701,6 @@ export default function FormScreen() {
               style={styles.picker}
               enabled={!isViewMode}
             >
-              {/* Placeholder item without enabled prop to avoid rendering issues */}
               <Picker.Item
                 label={field.placeholder || 'Select an option...'}
                 value=''
@@ -779,7 +790,44 @@ export default function FormScreen() {
           </View>
         )
 
+      case 'section':
+        return null
+
+      case 'checkbox':
+        return (
+          <View style={styles.checkboxContainer}>
+            <Pressable
+              style={[
+                styles.checkboxWrapper,
+                isViewMode && styles.checkboxDisabled
+              ]}
+              onPress={() => !isViewMode && handleChange(field.id, !value)}
+            >
+              <View style={[
+                styles.checkbox,
+                value && styles.checkboxChecked,
+                isViewMode && styles.checkboxViewMode
+              ]}>
+                {value && (
+                  <MaterialIcons 
+                    name="check" 
+                    size={18} 
+                    color={isViewMode ? "#6b7280" : "#ffffff"} 
+                  />
+                )}
+              </View>
+              <Text style={[
+                styles.checkboxLabel,
+                isViewMode && styles.checkboxLabelViewMode
+              ]}>
+                {field.placeholder || 'Check this option'}
+              </Text>
+            </Pressable>
+          </View>
+        )
+
       default:
+        console.warn(`Unsupported field type: ${field.type}`)
         return <Text style={styles.unsupportedField}>{`Unsupported field type: ${field.type}`}</Text>
     }
   }
@@ -852,7 +900,6 @@ export default function FormScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Audit Title Field */}
         <View style={styles.fieldCard}>
           <View style={styles.fieldHeader}>
             <Text style={styles.fieldNumber}>1.</Text>
@@ -886,29 +933,42 @@ export default function FormScreen() {
           </View>
         </View>
 
-        {/* Form Fields */}
-        {schema.fields.map((field, index) => (
-          <View key={field.id} style={styles.fieldCard}>
-            <View style={styles.fieldHeader}>
-              <Text style={styles.fieldNumber}>{index + 2}.</Text>
-              <View style={styles.fieldTitleContainer}>
-                <Text style={styles.fieldLabel}>
-                  {field.label}
-                  {field.required && <Text style={styles.required}> *</Text>}
-                </Text>
+        {schema.fields.map((field, index) => {
+          console.log(`Mapping field: ${field.id}, type: ${field.type}, label: ${field.label}`)
+          if (field.type === 'section' || field.isSection) {
+            return (
+              <View key={field.id} style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>{field.label}</Text>
                 {field.description && (
-                  <Text style={styles.fieldDescription}>{field.description}</Text>
+                  <Text style={styles.sectionDescription}>{field.description}</Text>
                 )}
               </View>
+            )
+          }
+
+          return (
+            <View key={field.id} style={styles.fieldCard}>
+              <View style={styles.fieldHeader}>
+                <Text style={styles.fieldNumber}>{index + 2}.</Text>
+                <View style={styles.fieldTitleContainer}>
+                  <Text style={styles.fieldLabel}>
+                    {field.label}
+                    {field.required && <Text style={styles.required}> *</Text>}
+                  </Text>
+                  {field.description && (
+                    <Text style={styles.fieldDescription}>{field.description}</Text>
+                  )}
+                </View>
+              </View>
+              <View style={styles.fieldInputContainer}>
+                {renderField(field)}
+              </View>
+              {errors[field.id] && (
+                <Text style={styles.errorText}>{errors[field.id]}</Text>
+              )}
             </View>
-            <View style={styles.fieldInputContainer}>
-              {renderField(field)}
-            </View>
-            {errors[field.id] && (
-              <Text style={styles.errorText}>{errors[field.id]}</Text>
-            )}
-          </View>
-        ))}
+          )
+        })}
 
         <View style={styles.fieldCard}>
           <View style={styles.fieldHeader}>
@@ -1418,5 +1478,68 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
+  },
+  checkboxContainer: {
+    marginVertical: 8,
+  },
+  checkboxWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#f9fafb',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  checkboxDisabled: {
+    backgroundColor: '#f3f4f6',
+    opacity: 0.6,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#d1d5db',
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  checkboxChecked: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#3b82f6',
+  },
+  checkboxViewMode: {
+    borderColor: '#9ca3af',
+    backgroundColor: '#f3f4f6',
+  },
+  checkboxLabel: {
+    fontSize: 16,
+    color: '#374151',
+    flex: 1,
+  },
+  checkboxLabelViewMode: {
+    color: '#6b7280',
+  },
+  sectionHeader: {
+    marginTop: 32,
+    marginBottom: 16,
+    marginHorizontal: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 2,
+    borderBottomColor: '#3b82f6',
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginBottom: 4,
+  },
+  sectionDescription: {
+    fontSize: 14,
+    color: '#64748b',
+    lineHeight: 20,
   },
 })
