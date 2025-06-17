@@ -10,7 +10,7 @@ import { supabase } from '../../lib/supabase'
 interface ComplianceRecord {
   id: number
   name: string
-  status: string
+  status: string // Can be 'active', 'inactive', 'pending', 'archived', etc.
   description?: string
 }
 
@@ -39,7 +39,11 @@ const Audit = () => {
         setTimeout(() => reject(new Error('Request timeout')), 10000)
       );
       
-      const supabasePromise = supabase.from('compliance').select('*');
+      const supabasePromise = supabase
+        .from('compliance')
+        .select('*')
+        .eq('status', 'active')
+        .order('name', { ascending: true });
       
       const { data, error } = await Promise.race([supabasePromise, timeoutPromise]) as any;
       
@@ -49,7 +53,16 @@ const Audit = () => {
       }
       
       if (data) {
+        console.log('Fetched active compliance records:', data.length)
+        console.log('Active compliance records:', data.map((record: ComplianceRecord) => ({ 
+          id: record.id, 
+          name: record.name, 
+          status: record.status 
+        })))
         setCompliances(data as ComplianceRecord[])
+      } else {
+        console.log('No active compliance records found')
+        setCompliances([])
       }
     } catch (error) {
       console.error('Error fetching compliances:', error)
@@ -83,9 +96,9 @@ const Audit = () => {
 
   const renderEmptyState = () => (
     <Card style={styles.emptyCard}>
-      <Text style={styles.emptyTitle}>No Compliance Records</Text>
+      <Text style={styles.emptyTitle}>No Active Compliance Records</Text>
       <Text style={styles.emptyDescription}>
-        There are no compliance records available at the moment.
+        There are no active compliance records available at the moment. Contact your administrator to activate compliance forms.
       </Text>
     </Card>
   )
@@ -95,7 +108,7 @@ const Audit = () => {
       <Screen style={styles.container}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#3b82f6" />
-          <Text style={styles.loadingText}>Loading compliance records...</Text>
+          <Text style={styles.loadingText}>Loading active compliance forms...</Text>
         </View>
       </Screen>
     )
@@ -105,7 +118,7 @@ const Audit = () => {
     <Screen style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Compliance Audit</Text>
-        <Text style={styles.subtitle}>Manage and review compliance records</Text>
+        <Text style={styles.subtitle}>Active compliance forms available for audit</Text>
       </View>
 
       <FlatList

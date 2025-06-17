@@ -6,7 +6,8 @@ import {
     RefreshControl,
     StyleSheet,
     Text,
-    View
+    View,
+    Pressable
 } from 'react-native'
 import BackButton from '../../components/BackButton'
 import Card from '../../components/Card'
@@ -18,7 +19,7 @@ import { supabase } from '../../lib/supabase'
 interface FormRecord {
     id: number
     form_schema: { title: string; [key: string]: any }
-    status: string
+    status: string // Can be 'active', 'inactive', 'draft', 'archived', etc.
 }
 
 const AuditDetail = () => {
@@ -29,15 +30,19 @@ const AuditDetail = () => {
 
     const fetchForms = async () => {
         if (!id) return
-        
         try {
+            setLoading(true)
             const { data, error } = await supabase
                 .from('form')
                 .select('id, form_schema, status')
                 .eq('compliance_id', id)
+                .eq('status', 'active')
+                .order('id', { ascending: true })
 
             if (!error && data) {
                 setForms(data as FormRecord[])
+            } else {
+                setForms([])
             }
         } catch (error) {
             console.error('Error fetching forms:', error)
@@ -73,10 +78,12 @@ const AuditDetail = () => {
 
     const renderEmptyState = () => (
         <Card style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>No Forms Available</Text>
-            <Text style={styles.emptyDescription}>
-                There are no forms available for this compliance record yet.
-            </Text>
+            <View style={styles.emptyContent}>
+                <Text style={styles.emptyTitle}>No Active Forms Available</Text>
+                <Text style={styles.emptyDescription}>
+                    There are no active forms available for this compliance record. Contact your administrator to activate forms.
+                </Text>
+            </View>
         </Card>
     )
 
@@ -90,7 +97,7 @@ const AuditDetail = () => {
                 />
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color="#3b82f6" />
-                    <Text style={styles.loadingText}>Loading forms...</Text>
+                    <Text style={styles.loadingText}>Loading active forms...</Text>
                 </View>
             </Screen>
         )
@@ -103,18 +110,23 @@ const AuditDetail = () => {
                 title="Back to Compliance List"
                 style={styles.backButton}
             />
-              <View style={styles.header}>
-                <Text style={styles.title}>Compliance Forms</Text>
-                <Text style={styles.subtitle}>Review and complete forms for compliance {id}</Text>
+            <View style={styles.header}>
+                <Text style={styles.title}>Active Compliance Forms</Text>
+                <Text style={styles.subtitle}>Review and complete active forms for compliance {id}</Text>
             </View>
             
             <FlatList
                 data={forms}
-                keyExtractor={(f) => f.id.toString()}
+                keyExtractor={(item) => item.id.toString()}
                 renderItem={renderFormItem}
                 ListEmptyComponent={renderEmptyState}
                 refreshControl={
-                    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+                    <RefreshControl 
+                        refreshing={refreshing} 
+                        onRefresh={onRefresh} 
+                        colors={['#3b82f6']}
+                        tintColor="#3b82f6"
+                    />
                 }
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.listContainer}
@@ -157,20 +169,25 @@ const styles = StyleSheet.create({
         marginTop: 16,
         fontSize: 16,
         color: '#6b7280',
-    },    listContainer: {
+    },
+    listContainer: {
         paddingHorizontal: 16,
-        paddingBottom: 120, // Account for redesigned tab bar
+        paddingBottom: 120,
     },
     emptyCard: {
         margin: 16,
+        padding: 16,
+    },
+    emptyContent: {
         alignItems: 'center',
-        paddingVertical: 32,
+        paddingVertical: 16,
     },
     emptyTitle: {
         fontSize: 20,
         fontWeight: '600',
         color: '#374151',
         marginBottom: 8,
+        textAlign: 'center',
     },
     emptyDescription: {
         fontSize: 16,

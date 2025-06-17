@@ -1,6 +1,6 @@
 import { router } from 'expo-router'
 import React, { useEffect, useState } from 'react'
-import { ScrollView, StyleSheet, Text, View } from 'react-native'
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native'
 import Button from '../../components/Button'
 import Card from '../../components/Card'
 import DashboardHeader from '../../components/DashboardHeader'
@@ -8,12 +8,15 @@ import Screen from '../../components/Screen'
 import StatsGrid, { StatData } from '../../components/StatsGrid'
 import StatusBadge from '../../components/StatusBadge'
 import { supabase } from '../../lib/supabase'
+import { useAuth } from '../../lib/useAuth'
 
 interface DashboardStats {
-  totalCompliance: number
+  totalAudits: number
   pendingAudits: number
-  completedForms: number
-  failedItems: number
+  completedAudits: number
+  failedAudits: number
+  averageScore: number
+  totalForms: number
 }
 
 interface RecentActivity {
@@ -22,106 +25,184 @@ interface RecentActivity {
   type: 'audit' | 'form' | 'compliance'
   status: string
   date: string
+  percentage?: number
+  result?: string
 }
 
 export default function Index() {
+  const { user } = useAuth()
   const [stats, setStats] = useState<DashboardStats>({
-    totalCompliance: 0,
+    totalAudits: 0,
     pendingAudits: 0,
-    completedForms: 0,
-    failedItems: 0
+    completedAudits: 0,
+    failedAudits: 0,
+    averageScore: 0,
+    totalForms: 0
   })
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
-    fetchDashboardData()
-  }, [])
+    if (user?.id) {
+      fetchDashboardData()
+    }
+  }, [user?.id])
 
   const fetchDashboardData = async () => {
+    if (!user?.id) {
+      setLoading(false)
+      setRefreshing(false)
+      return
+    }
+
     try {
-      setLoading(true)
+      if (!refreshing) {
+        setLoading(true)
+      }
       
-      // Fetch compliance records count
-      const { count: totalCompliance } = await supabase
-        .from('compliance')
-        .select('*', { count: 'exact', head: true })
+      // Fetch all audits for the current user
+      const { data: auditsData, error: auditsError } = await supabase
+        .from('audit')
+        .select(`
+          *,
+          form:form_id (
+            form_schema
+          )
+        `)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
 
-      // Fetch pending audits (you can adjust the status condition)
-      const { count: pendingAudits } = await supabase
-        .from('compliance')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'pending')
+      if (auditsError) {
+        console.error('Error fetching audits:', auditsError)
+        setLoading(false)
+        return
+      }
 
-      // Mock data for completed forms and failed items
-      // You'll need to adjust these queries based on your actual schema
-      const completedForms = 25
-      const failedItems = 3
+      const audits = auditsData || []
+
+      // Debug: Log audit status and result values
+      console.log('Audit data for statistics:', audits.map(audit => ({
+        id: audit.id,
+        status: audit.status,
+        result: audit.result,
+        percentage: audit.percentage
+      })))
+
+      // Calculate statistics
+      const totalAudits = audits.length
+      const pendingAudits = audits.filter(audit => audit.status === 'pending').length
+      const completedAudits = audits.filter(audit => audit.status === 'completed').length
+      const failedAudits = audits.filter(audit => audit.result === 'failed').length
+      
+      // Calculate average score
+      const auditScores = audits.filter(audit => audit.percentage != null).map(audit => audit.percentage)
+      const averageScore = auditScores.length > 0 ? Math.round(auditScores.reduce((sum, score) => sum + score, 0) / auditScores.length) : 0
+
+      // Get total number of unique forms
+      const { count: totalForms } = await supabase
+        .from('form')
+        .select('*', { count: 'exact', head: true })
 
       setStats({
-        totalCompliance: totalCompliance || 0,
-        pendingAudits: pendingAudits || 0,
-        completedForms,
-        failedItems
+        totalAudits,
+        pendingAudits,
+        completedAudits,
+        failedAudits,
+        averageScore,
+        totalForms: totalForms || 0
       })
 
-      // Fetch recent activity (mock data - adjust based on your schema)
-      const mockActivity: RecentActivity[] = [
-        {
-          id: '1',
-          title: 'KFC Franchise Audit',
-          type: 'audit',
-          status: 'completed',
-          date: '2 hours ago'
-        },
-        {
-          id: '2', 
-          title: 'Refrigerator Condition Form',
-          type: 'form',
-          status: 'pending',
-          date: '1 day ago'
-        },
-        {
-          id: '3',
-          title: 'Food Safety Compliance',
-          type: 'compliance',
-          status: 'in_progress',
-          date: '2 days ago'
+      console.log('Calculated statistics:', {
+        totalAudits,
+        pendingAudits,
+        completedAudits,
+        failedAudits,
+        averageScore,
+        totalForms: totalForms || 0
+      })
+
+      // Create recent activity from audits
+      const recentAudits: RecentActivity[] = audits.slice(0, 5).map((audit) => {
+        const formTitle = audit.form?.form_schema?.title || 'Unknown Form'
+        const auditTitle = audit.title || formTitle
+        
+        // Calculate relative time
+        const auditDate = new Date(audit.created_at)
+        const now = new Date()
+        const diffInHours = Math.floor((now.getTime() - auditDate.getTime()) / (1000 * 60 * 60))
+        
+        let timeString = ''
+        if (diffInHours < 1) {
+          timeString = 'Just now'
+        } else if (diffInHours < 24) {
+          timeString = `${diffInHours} hour${diffInHours > 1 ? 's' : ''} ago`
+        } else {
+          const diffInDays = Math.floor(diffInHours / 24)
+          timeString = `${diffInDays} day${diffInDays > 1 ? 's' : ''} ago`
         }
-      ]
+
+        return {
+          id: audit.id.toString(),
+          title: auditTitle,
+          type: 'audit' as const,
+          status: audit.status,
+          date: timeString,
+          percentage: audit.percentage,
+          result: audit.result
+        }
+      })
       
-      setRecentActivity(mockActivity)
+      setRecentActivity(recentAudits)
     } catch (error) {
       console.error('Error fetching dashboard data:', error)
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
+  }
+
+  const onRefresh = () => {
+    setRefreshing(true)
+    fetchDashboardData()
   }
 
   const statsData: StatData[] = [
     {
-      title: 'Total Records',
-      value: stats.totalCompliance,
-      icon: 'folder',
+      title: 'Total Audits',
+      value: stats.totalAudits,
+      icon: 'assignment',
       color: '#3b82f6'
     },
     {
-      title: 'Pending Audits',
+      title: 'Average Score',
+      value: `${stats.averageScore}%`,
+      icon: 'trending-up',
+      color: '#8b5cf6'
+    },
+    {
+      title: 'Completed',
+      value: stats.completedAudits,
+      icon: 'check-circle',
+      color: '#10b981'
+    },
+    {
+      title: 'Pending',
       value: stats.pendingAudits,
       icon: 'pending-actions',
       color: '#f59e0b'
     },
     {
-      title: 'Completed Forms',
-      value: stats.completedForms,
-      icon: 'check-circle',
-      color: '#10b981'
-    },
-    {
-      title: 'Failed Items',
-      value: stats.failedItems,
+      title: 'Failed',
+      value: stats.failedAudits,
       icon: 'error',
       color: '#ef4444'
+    },
+    {
+      title: 'Forms Available',
+      value: stats.totalForms,
+      icon: 'description',
+      color: '#06b6d4'
     }
   ]
 
@@ -130,9 +211,39 @@ export default function Index() {
       <View style={styles.activityContent}>
         <View style={styles.activityText}>
           <Text style={styles.activityTitle}>{item.title}</Text>
-          <Text style={styles.activityDate}>{item.date}</Text>
+          <View style={styles.activityMeta}>
+            <Text style={styles.activityDate}>{item.date}</Text>
+            {item.percentage !== undefined && (
+              <Text style={styles.activityScore}>
+                <Text style={styles.activityScoreLabel}>Score: </Text>
+                <Text style={[
+                  styles.activityScoreValue,
+                  { color: item.percentage >= 80 ? '#10b981' : item.percentage >= 60 ? '#f59e0b' : '#ef4444' }
+                ]}>
+                  {item.percentage}%
+                </Text>
+              </Text>
+            )}
+          </View>
         </View>
-        <StatusBadge status={item.status} />
+        <View style={styles.activityBadges}>
+          <StatusBadge status={item.status} />
+          {item.result && (
+            <View style={styles.resultBadgeContainer}>
+              <View style={[
+                styles.resultBadge,
+                { backgroundColor: item.result === 'pass' ? '#dcfce7' : '#fee2e2' }
+              ]}>
+                <Text style={[
+                  styles.resultBadgeText,
+                  { color: item.result === 'pass' ? '#16a34a' : '#dc2626' }
+                ]}>
+                  {item.result.toUpperCase()}
+                </Text>
+              </View>
+            </View>
+          )}
+        </View>
       </View>
     </View>
   )
@@ -143,13 +254,21 @@ export default function Index() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#3b82f6']}
+            tintColor="#3b82f6"
+          />
+        }
       >
         <DashboardHeader 
           title="Welcome back!"
-          subtitle="Here's your compliance overview"
+          subtitle={loading ? "Loading your audit overview..." : "Here's your audit overview"}
         />
 
-        <StatsGrid stats={statsData} />
+        <StatsGrid stats={statsData} columns={3} />
 
         {/* Quick Actions */}
         <Card variant="default" style={styles.actionsCard}>
@@ -163,8 +282,8 @@ export default function Index() {
               style={styles.actionButton}
             />
             <Button
-              title="View Reports"
-              onPress={() => router.push('/audit')}
+              title="View History"
+              onPress={() => router.push('/(tabs)/history')}
               variant="secondary"
               size="medium"
               style={styles.actionButton}
@@ -175,16 +294,29 @@ export default function Index() {
         {/* Recent Activity */}
         <Card variant="default" style={styles.activityCard}>
           <Text style={styles.sectionTitle}>Recent Activity</Text>
-          {recentActivity.map((item) => (
-            <ActivityItem key={item.id} item={item} />
-          ))}
-          <Button
-            title="View All Activity"
-            onPress={() => router.push('/audit')}
-            variant="ghost"
-            size="small"
-            style={styles.viewAllButton}
-          />
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <Text style={styles.loadingText}>Loading recent audits...</Text>
+            </View>
+          ) : recentActivity.length > 0 ? (
+            <>
+              {recentActivity.map((item) => (
+                <ActivityItem key={item.id} item={item} />
+              ))}
+              <Button
+                title="View All Activity"
+                onPress={() => router.push('/(tabs)/history')}
+                variant="ghost"
+                size="small"
+                style={styles.viewAllButton}
+              />
+            </>
+          ) : (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>No audits completed yet</Text>
+              <Text style={styles.emptySubtext}>Start your first audit to see it here</Text>
+            </View>
+          )}
         </Card>
       </ScrollView>
     </Screen>
@@ -278,7 +410,7 @@ const styles = StyleSheet.create({
   },
   activityContent: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     paddingVertical: 12,
     paddingHorizontal: 16,
     backgroundColor: '#f9fafb',
@@ -288,7 +420,12 @@ const styles = StyleSheet.create({
   },
   activityText: {
     flex: 1,
-    marginLeft: 12,
+  },
+  activityMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 2,
   },
   activityTitle: {
     fontSize: 14,
@@ -299,6 +436,59 @@ const styles = StyleSheet.create({
   activityDate: {
     fontSize: 12,
     color: '#6b7280',
+  },
+  activityScore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  activityScoreLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+  },
+  activityScoreValue: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  activityBadges: {
+    flexDirection: 'column',
+    gap: 8,
+    alignItems: 'flex-end',
+  },
+  resultBadgeContainer: {
+    marginTop: 4,
+  },
+  resultBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  resultBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  loadingContainer: {
+    paddingVertical: 24,
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  emptyContainer: {
+    paddingVertical: 32,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#6b7280',
+    textAlign: 'center',
   },
   viewAllButton: {
     marginTop: 12,
