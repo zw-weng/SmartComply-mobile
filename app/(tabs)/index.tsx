@@ -14,6 +14,7 @@ interface DashboardStats {
   totalAudits: number
   pendingAudits: number
   completedAudits: number
+  draftAudits: number
   failedAudits: number
   averageScore: number
   totalForms: number
@@ -35,6 +36,7 @@ export default function Index() {
     totalAudits: 0,
     pendingAudits: 0,
     completedAudits: 0,
+    draftAudits: 0,
     failedAudits: 0,
     averageScore: 0,
     totalForms: 0
@@ -93,6 +95,7 @@ export default function Index() {
       const totalAudits = audits.length
       const pendingAudits = audits.filter(audit => audit.status === 'pending').length
       const completedAudits = audits.filter(audit => audit.status === 'completed').length
+      const draftAudits = audits.filter(audit => audit.status === 'draft').length
       const failedAudits = audits.filter(audit => audit.result === 'failed').length
       
       // Calculate average score
@@ -108,6 +111,7 @@ export default function Index() {
         totalAudits,
         pendingAudits,
         completedAudits,
+        draftAudits,
         failedAudits,
         averageScore,
         totalForms: totalForms || 0
@@ -117,6 +121,7 @@ export default function Index() {
         totalAudits,
         pendingAudits,
         completedAudits,
+        draftAudits,
         failedAudits,
         averageScore,
         totalForms: totalForms || 0
@@ -191,6 +196,12 @@ export default function Index() {
       value: stats.pendingAudits,
       icon: 'pending-actions',
       color: '#f59e0b'
+    },
+    {
+      title: 'Drafts',
+      value: stats.draftAudits,
+      icon: 'edit',
+      color: '#8b5cf6'
     },
     {
       title: 'Failed',

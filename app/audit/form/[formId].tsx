@@ -1,18 +1,20 @@
 import { MaterialIcons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    ActivityIndicator,
+    Alert,
+    Image,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
 import BackButton from '../../../components/BackButton';
 import Screen from '../../../components/Screen';
@@ -27,7 +29,7 @@ type EnhancedOption = {
 
 type FieldDef = {
   id: string;
-  type: 'text' | 'number' | 'boolean' | 'select' | 'textarea' | 'image' | 'section' | 'checkbox';
+  type: 'text' | 'number' | 'boolean' | 'select' | 'textarea' | 'image' | 'section' | 'checkbox' | 'email' | 'dropdown' | 'radio' | 'date';
   label: string;
   required?: boolean;
   placeholder?: string;
@@ -63,10 +65,15 @@ export default function FormScreen() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [isEditing, setIsEditing] = useState(false);
-  const [isViewMode, setIsViewMode] = useState(mode === 'view');
-  const [existingAuditId, setExistingAuditId] = useState<string | null>(null);
-  const [uploadingImages, setUploadingImages] = useState<Record<string, boolean>>({});
+  const [isEditing, setIsEditing] = useState(false);  const [isViewMode, setIsViewMode] = useState(mode === 'view');
+  const [existingAuditId, setExistingAuditId] = useState<string | null>(null);  const [uploadingImages, setUploadingImages] = useState<Record<string, boolean>>({});
+  const [showDatePicker, setShowDatePicker] = useState<string | null>(null);
+  const [savingDraft, setSavingDraft] = useState(false);
+
+  const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
 
   const testStorageBucket = async () => {
     try {
@@ -316,7 +323,6 @@ export default function FormScreen() {
       setErrors(prev => ({ ...prev, [fieldId]: '' }));
     }
   };
-
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
     if (!auditTitle.trim()) {
@@ -326,6 +332,11 @@ export default function FormScreen() {
     schema?.fields.forEach((field) => {
       if (field.required && (!values[field.id] || values[field.id] === '')) {
         newErrors[field.id] = `${field.label} is required`;
+      }
+      
+      // Email validation
+      if (field.type === 'email' && values[field.id] && !validateEmail(values[field.id])) {
+        newErrors[field.id] = 'Please enter a valid email address';
       }
     });
 
@@ -388,15 +399,18 @@ export default function FormScreen() {
       case 'fail': return 'FAILED';
       default: return result.toUpperCase();
     }
-  };
-
-  const submitForm = async () => {
+  };  const submitForm = async (isDraft: boolean = false) => {
     if (!user) {
       Alert.alert('Authentication Required', 'You must be logged in to submit a form.');
       return;
     }
 
-    setSubmitting(true);
+    if (isDraft) {
+      setSavingDraft(true);
+    } else {
+      setSubmitting(true);
+    }
+    
     try {
       const scoreResult = calculateScore();
       const autoFailCheck = checkAutoFail();
@@ -404,13 +418,19 @@ export default function FormScreen() {
       let finalPercentage = Math.round(scoreResult.passPercentage * 100) / 100;
       let finalResult = finalPercentage >= 60 ? 'pass' : 'failed';
 
-      if (autoFailCheck.isFail) {
+      if (autoFailCheck.isFail && !isDraft) {
         finalResult = 'failed';
         finalPercentage = 1;
         finalMarks = 0.1;
       }
 
-      const finalStatus = finalResult === 'pass' ? 'completed' : 'pending';
+      // Set status based on whether it's a draft or final submission
+      let finalStatus: string;
+      if (isDraft) {
+        finalStatus = 'draft';
+      } else {
+        finalStatus = finalResult === 'pass' ? 'completed' : 'pending';
+      }
 
       let auditData, auditError;
       if (isEditing && existingAuditId) {
@@ -419,9 +439,9 @@ export default function FormScreen() {
           .update({
             title: auditTitle.trim(),
             status: finalStatus,
-            result: finalResult,
-            marks: finalMarks,
-            percentage: finalPercentage,
+            result: isDraft ? null : finalResult,
+            marks: isDraft ? null : finalMarks,
+            percentage: isDraft ? null : finalPercentage,
             comments: userComments || '',
             audit_data: values,
             last_edit_at: new Date().toISOString(),
@@ -441,9 +461,9 @@ export default function FormScreen() {
             user_id: user.id,
             title: auditTitle.trim(),
             status: finalStatus,
-            result: finalResult,
-            marks: finalMarks,
-            percentage: finalPercentage,
+            result: isDraft ? null : finalResult,
+            marks: isDraft ? null : finalMarks,
+            percentage: isDraft ? null : finalPercentage,
             comments: userComments || null,
             audit_data: values,
           })
@@ -456,21 +476,40 @@ export default function FormScreen() {
 
       if (auditError) throw auditError;
 
-      const actionText = isEditing ? 'updated' : 'submitted';
-      Alert.alert(
-        `Audit ${isEditing ? 'Updated' : 'Completed'}`,
-        `Form ${actionText} successfully!\n\nScore: ${finalMarks}/${scoreResult.maxScore}\nPercentage: ${finalPercentage.toFixed(1)}%\nResult: ${formatResultForDisplay(finalResult)}\nStatus: ${finalStatus.toUpperCase()}`,
-        [
-          {
-            text: 'View Audit History',
-            onPress: () => {
-              router.push('/(tabs)/history');
+      if (isDraft) {
+        Alert.alert(
+          'Draft Saved',
+          'Your audit has been saved as a draft. You can continue working on it later.',
+          [
+            {
+              text: 'Continue Editing',
+              style: 'default'
+            },
+            {
+              text: 'View Drafts',
+              onPress: () => {
+                router.push('/(tabs)/history');
+              }
             }
-          }
-        ]
-      );
+          ]
+        );
+      } else {
+        const actionText = isEditing ? 'updated' : 'submitted';
+        Alert.alert(
+          `Audit ${isEditing ? 'Updated' : 'Completed'}`,
+          `Form ${actionText} successfully!\n\nScore: ${finalMarks}/${scoreResult.maxScore}\nPercentage: ${finalPercentage.toFixed(1)}%\nResult: ${formatResultForDisplay(finalResult)}\nStatus: ${finalStatus.toUpperCase()}`,
+          [
+            {
+              text: 'View Audit History',
+              onPress: () => {
+                router.push('/(tabs)/history');
+              }
+            }
+          ]
+        );
+      }
     } catch (error: any) {
-      let errorMessage = 'Failed to submit audit. Please try again.';
+      let errorMessage = isDraft ? 'Failed to save draft. Please try again.' : 'Failed to submit audit. Please try again.';
       if (error?.code === '42501') {
         errorMessage = 'Permission denied. You may not have the required permissions to submit this audit.';
       } else if (error?.code === 'PGRST204') {
@@ -479,13 +518,12 @@ export default function FormScreen() {
         errorMessage = 'Invalid result value. The audit result does not meet database constraints.';
       } else if (error?.message?.includes('authentication')) {
         errorMessage = 'Authentication required. Please log in and try again.';
-      }
-      Alert.alert('Error', errorMessage);
+      }      Alert.alert('Error', errorMessage);
     } finally {
       setSubmitting(false);
+      setSavingDraft(false);
     }
   };
-
   const handleSubmit = async () => {
     if (!validateForm()) {
       Alert.alert('Validation Error', 'Please fill in all required fields');
@@ -499,12 +537,21 @@ export default function FormScreen() {
         `Form automatically failed: ${autoFailCheck.reason}`,
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Submit Anyway', onPress: submitForm }
+          { text: 'Submit Anyway', onPress: () => submitForm(false) }
         ]
       );
       return;
     }
-    submitForm();
+    submitForm(false);
+  };
+
+  const saveDraft = async () => {
+    if (!auditTitle.trim()) {
+      Alert.alert('Title Required', 'Please provide an audit title before saving as draft.');
+      return;
+    }
+    
+    await submitForm(true);
   };
 
   const renderField = (field: FieldDef) => {
@@ -734,7 +781,169 @@ export default function FormScreen() {
               ]}>
                 {field.placeholder || 'Check this option'}
               </Text>
+            </Pressable>          </View>
+        );
+
+      case 'email':
+        return (
+          <TextInput
+            style={[
+              styles.input,
+              hasError && styles.inputError,
+              isViewMode && styles.inputReadOnly
+            ]}
+            placeholder={field.placeholder || 'Enter email address'}
+            value={String(value || '')}
+            onChangeText={(text) => handleChange(field.id, text)}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!isViewMode}
+          />
+        );
+
+      case 'dropdown':
+        // Dropdown is similar to select, but can handle different option structures
+        const dropdownOptions = field.enhancedOptions ||
+          (field.options ? field.options.map(opt => ({
+            value: String(opt),
+            points: 0,
+            isFailOption: false
+          })) : []);
+
+        const validDropdownOptions = dropdownOptions.filter(opt => typeof opt.value === 'string' && opt.value.trim() !== '');
+        if (validDropdownOptions.length === 0) {
+          return (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>No valid options available for this dropdown</Text>
+            </View>
+          );
+        }
+
+        return (
+          <View style={[
+            styles.pickerContainer,
+            hasError && styles.inputError,
+            isViewMode && styles.inputReadOnly
+          ]}>
+            <Picker
+              selectedValue={value || ''}
+              onValueChange={(itemValue) => !isViewMode && handleChange(field.id, String(itemValue))}
+              style={styles.picker}
+              enabled={!isViewMode}
+            >
+              <Picker.Item
+                label={field.placeholder || 'Select an option...'}
+                value=""
+                color="#999"
+              />
+              {validDropdownOptions.map((option, index) => (
+                <Picker.Item
+                  key={`${field.id}-dropdown-${option.value}-${index}`}
+                  label={option.value}
+                  value={option.value}
+                  color={option.isFailOption ? '#ef4444' : '#000'}
+                />
+              ))}
+            </Picker>
+          </View>
+        );
+
+      case 'radio':
+        const radioOptions = field.enhancedOptions ||
+          (field.options ? field.options.map(opt => ({
+            value: String(opt),
+            points: 0,
+            isFailOption: false
+          })) : []);
+
+        const validRadioOptions = radioOptions.filter(opt => typeof opt.value === 'string' && opt.value.trim() !== '');
+        if (validRadioOptions.length === 0) {
+          return (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>No valid options available for this radio group</Text>
+            </View>
+          );
+        }
+
+        return (
+          <View style={styles.radioContainer}>
+            {validRadioOptions.map((option, index) => (
+              <Pressable
+                key={`${field.id}-radio-${option.value}-${index}`}
+                style={[
+                  styles.radioOption,
+                  isViewMode && styles.radioDisabled
+                ]}
+                onPress={() => !isViewMode && handleChange(field.id, option.value)}
+              >
+                <View style={styles.radioButton}>
+                  <View style={[
+                    styles.radioButtonOuter,
+                    value === option.value && styles.radioButtonSelected,
+                    isViewMode && styles.radioButtonViewMode
+                  ]}>
+                    {value === option.value && (
+                      <View style={[
+                        styles.radioButtonInner,
+                        isViewMode && styles.radioButtonInnerViewMode
+                      ]} />
+                    )}
+                  </View>
+                </View>
+                <Text style={[
+                  styles.radioLabel,
+                  isViewMode && styles.radioLabelViewMode,
+                  option.isFailOption && styles.radioLabelFail
+                ]}>
+                  {option.value}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        );
+
+      case 'date':
+        const dateValue = value ? new Date(value) : new Date();
+        const formattedDate = value ? dateValue.toLocaleDateString() : '';
+
+        return (
+          <View>
+            <Pressable
+              style={[
+                styles.dateInput,
+                hasError && styles.inputError,
+                isViewMode && styles.inputReadOnly
+              ]}
+              onPress={() => !isViewMode && setShowDatePicker(field.id)}
+              disabled={isViewMode}
+            >
+              <Text style={[
+                styles.dateText,
+                !value && styles.datePlaceholder,
+                isViewMode && styles.dateTextViewMode
+              ]}>
+                {formattedDate || field.placeholder || 'Select date'}
+              </Text>
+              <MaterialIcons 
+                name="calendar-today" 
+                size={20} 
+                color={isViewMode ? "#9ca3af" : "#6b7280"} 
+              />
             </Pressable>
+            {showDatePicker === field.id && !isViewMode && (
+              <DateTimePicker
+                value={dateValue}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(event, selectedDate) => {
+                  setShowDatePicker(null);
+                  if (selectedDate) {
+                    handleChange(field.id, selectedDate.toISOString());
+                  }
+                }}
+              />
+            )}
           </View>
         );
 
@@ -918,14 +1127,23 @@ export default function FormScreen() {
             />
           </View>
         </View>
-      </ScrollView>
-
-      {!isViewMode && (
+      </ScrollView>      {!isViewMode && (
         <View style={styles.submitContainer}>
+          <Pressable
+            style={[styles.draftButton, savingDraft && styles.draftButtonDisabled]}
+            onPress={saveDraft}
+            disabled={savingDraft || submitting}
+          >
+            <MaterialIcons name="save" size={20} color="#6b7280" />
+            <Text style={styles.draftButtonText}>
+              {savingDraft ? 'Saving...' : 'Save as Draft'}
+            </Text>
+          </Pressable>
+          
           <Pressable
             style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
             onPress={handleSubmit}
-            disabled={submitting}
+            disabled={submitting || savingDraft}
           >
             <Text style={styles.submitButtonText}>
               {submitting ? (isEditing ? 'Updating...' : 'Submitting...') : (isEditing ? 'Update Audit' : 'Submit Form')}
@@ -1137,18 +1355,40 @@ const styles = StyleSheet.create({
   },
   picker: {
     height: 50,
-  },
-  submitContainer: {
+  },  submitContainer: {
     paddingHorizontal: 16,
     paddingBottom: 32,
     paddingTop: 16,
+    flexDirection: 'row',
+    gap: 12,
+  },
+  draftButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f9fafb',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    gap: 8,
+  },
+  draftButtonDisabled: {
+    opacity: 0.6,
+  },
+  draftButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6b7280',
   },
   submitButton: {
+    flex: 1,
     backgroundColor: '#3b82f6',
     paddingVertical: 16,
     paddingHorizontal: 24,
     borderRadius: 12,
-    marginVertical: 32,
     shadowColor: '#3b82f6',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -1464,10 +1704,93 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1e293b',
     marginBottom: 4,
-  },
-  sectionDescription: {
+  },  sectionDescription: {
     fontSize: 14,
     color: '#64748b',
     lineHeight: 20,
+  },
+  // Radio button styles
+  radioContainer: {
+    marginVertical: 8,
+  },
+  radioOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#f9fafb',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    marginBottom: 8,
+  },
+  radioDisabled: {
+    backgroundColor: '#f3f4f6',
+    opacity: 0.6,
+  },
+  radioButton: {
+    marginRight: 12,
+  },
+  radioButtonOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#d1d5db',
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioButtonSelected: {
+    borderColor: '#3b82f6',
+  },
+  radioButtonViewMode: {
+    borderColor: '#9ca3af',
+    backgroundColor: '#f3f4f6',
+  },
+  radioButtonInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#3b82f6',
+  },
+  radioButtonInnerViewMode: {
+    backgroundColor: '#6b7280',
+  },
+  radioLabel: {
+    fontSize: 16,
+    color: '#374151',
+    flex: 1,
+  },
+  radioLabelViewMode: {
+    color: '#6b7280',
+  },
+  radioLabelFail: {
+    color: '#ef4444',
+    fontWeight: '600',
+  },
+  // Date input styles
+  dateInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 8,
+    minHeight: 56,
+  },
+  dateText: {
+    fontSize: 16,
+    color: '#374151',
+    flex: 1,
+  },
+  datePlaceholder: {
+    color: '#9ca3af',
+  },
+  dateTextViewMode: {
+    color: '#6b7280',
   },
 });

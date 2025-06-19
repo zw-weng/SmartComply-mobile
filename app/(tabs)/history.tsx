@@ -50,7 +50,7 @@ export default function HistoryScreen() {
   const [selectedAudit, setSelectedAudit] = useState<AuditRecord | null>(null);
   const [showOptionsModal, setShowOptionsModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'complete'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'completed' | 'draft'>('all');
 
   const fetchAudits = async () => {
     if (!user?.id) {
@@ -157,7 +157,6 @@ export default function HistoryScreen() {
     setRefreshing(true);
     fetchAudits();
   }, []);
-
   const getResultColor = (result: string) => {
     switch (result.toLowerCase()) {
       case 'pass':
@@ -166,6 +165,8 @@ export default function HistoryScreen() {
       case 'fail':
       case 'failed':
         return '#ef4444';
+      case 'draft':
+        return '#8b5cf6';
       default:
         return '#6b7280';
     }
@@ -179,11 +180,12 @@ export default function HistoryScreen() {
       case 'fail':
       case 'failed':
         return '#fee2e2';
+      case 'draft':
+        return '#ede9fe';
       default:
         return '#f3f4f6';
     }
   };
-
   const getResultIcon = (result: string) => {
     switch (result.toLowerCase()) {
       case 'pass':
@@ -192,19 +194,22 @@ export default function HistoryScreen() {
       case 'fail':
       case 'failed':
         return 'cancel';
+      case 'draft':
+        return 'edit';
       default:
         return 'help';
     }
   };
-
   const getStatusColor = (status: string) => {
     const normalizedStatus = status.toLowerCase();
     if (normalizedStatus.includes('completed') || normalizedStatus.includes('done')) {
       return '#10b981';
     } else if (normalizedStatus.includes('in_progress') || normalizedStatus.includes('progress')) {
       return '#f59e0b';
-    } else if (normalizedStatus.includes('pending') || normalizedStatus.includes('draft')) {
+    } else if (normalizedStatus.includes('pending')) {
       return '#3b82f6';
+    } else if (normalizedStatus.includes('draft')) {
+      return '#8b5cf6';
     } else if (normalizedStatus.includes('failed') || normalizedStatus.includes('error')) {
       return '#ef4444';
     }
@@ -217,8 +222,10 @@ export default function HistoryScreen() {
       return '#d1fae5';
     } else if (normalizedStatus.includes('in_progress') || normalizedStatus.includes('progress')) {
       return '#fef3c7';
-    } else if (normalizedStatus.includes('pending') || normalizedStatus.includes('draft')) {
+    } else if (normalizedStatus.includes('pending')) {
       return '#dbeafe';
+    } else if (normalizedStatus.includes('draft')) {
+      return '#ede9fe';
     } else if (normalizedStatus.includes('failed') || normalizedStatus.includes('error')) {
       return '#fee2e2';
     }
@@ -286,11 +293,19 @@ export default function HistoryScreen() {
     setSelectedAudit(audit);
     setShowOptionsModal(true);
   };
-
   const handleViewDetails = () => {
     if (selectedAudit) {
       setShowOptionsModal(false);
-      router.push(`/audit/form/${selectedAudit.form_id}?auditId=${selectedAudit.id}&mode=view`);
+      // If it's a draft, open in edit mode by default
+      const mode = selectedAudit.status === 'draft' ? 'edit' : 'view';
+      router.push(`/audit/form/${selectedAudit.form_id}?auditId=${selectedAudit.id}&mode=${mode}`);
+    }
+  };
+
+  const handleEditDraft = () => {
+    if (selectedAudit) {
+      setShowOptionsModal(false);
+      router.push(`/audit/form/${selectedAudit.form_id}?auditId=${selectedAudit.id}&mode=edit`);
     }
   };
 
@@ -303,27 +318,25 @@ export default function HistoryScreen() {
     const lastActivityDate = getLastActivityDate(audit);
     const timeInfo = audit.last_edit_at
       ? `\nLast Edit: ${formatFullDate(lastActivityDate)}\nOriginal Creation: ${formatFullDate(audit.created_at)}`
-      : `\nCreated: ${formatFullDate(audit.created_at)}`;
-    Alert.alert(
+      : `\nCreated: ${formatFullDate(audit.created_at)}`;    Alert.alert(
       'Audit Details',
       `Title: ${audit.title || 'Untitled Audit'}\nForm: ${audit.form?.form_schema?.title || 'Unknown Form'}\nAuditor: ${
         audit.profiles?.full_name || 'Unknown User'
-      }\nResult: ${audit.result.toUpperCase()}\nScore: ${audit.marks} (${audit.percentage.toFixed(1)}%)\nStatus: ${
+      }${audit.result ? `\nResult: ${audit.result.toUpperCase()}` : ''}${audit.marks !== null && audit.percentage !== null ? `\nScore: ${audit.marks} (${audit.percentage.toFixed(1)}%)` : '\nScore: Draft (not calculated)'}\nStatus: ${
         audit.status.toUpperCase()
       }${timeInfo}${audit.comments ? `\nComments: ${audit.comments}` : ''}`,
       [{ text: 'Close', style: 'cancel' }],
     );
   };
-
   const renderAuditItem = ({ item }: { item: AuditRecord }) => {
     console.log('Rendering audit item:', item); // Log to inspect item
     const editStatus = getEditStatus(item);
-    const resultColor = getResultColor(item.result);
-    const resultBgColor = getResultBackgroundColor(item.result);
+    const resultColor = getResultColor(item.result || 'draft');
+    const resultBgColor = getResultBackgroundColor(item.result || 'draft');
     const auditRef = generateAuditReference(item.id);
 
     // Type checks for safety
-    if (typeof item.result !== 'string') {
+    if (item.result !== null && typeof item.result !== 'string') {
       console.warn('item.result is not a string:', item.result);
     }
     if (typeof item.status !== 'string') {
@@ -340,8 +353,10 @@ export default function HistoryScreen() {
 
           <View style={styles.badgesContainer}>
             <View style={[styles.resultBadge, { backgroundColor: resultBgColor }]}>
-              <MaterialIcons name={getResultIcon(item.result) as any} size={18} color={resultColor} />
-              <Text style={[styles.resultText, { color: resultColor }]}>{item.result.toUpperCase()}</Text>
+              <MaterialIcons name={getResultIcon(item.result || 'draft') as any} size={18} color={resultColor} />
+              <Text style={[styles.resultText, { color: resultColor }]}>
+                {item.result ? item.result.toUpperCase() : 'DRAFT'}
+              </Text>
             </View>
             <View style={[styles.resultBadge, { backgroundColor: getStatusBackgroundColor(item.status) }]}>
               <Text style={[styles.resultText, { color: getStatusColor(item.status) }]}>
@@ -361,24 +376,29 @@ export default function HistoryScreen() {
               Form: {item.form?.form_schema?.title ?? 'Unknown Form'}
             </Text>
           </View>
-        </View>
-
-        {/* Score section with visual progress */}
+        </View>        {/* Score section with visual progress */}
         <View style={styles.scoreSection}>
           <View style={styles.scoreDetails}>
             <Text style={styles.scoreCardLabel}>Score</Text>
             <Text style={styles.scoreValue}>
-              {item.marks} ({item.percentage.toFixed(1)}%)
+              {item.percentage !== null && item.marks !== null 
+                ? `${item.marks} (${item.percentage.toFixed(1)}%)` 
+                : 'Draft'}
             </Text>
           </View>
 
           <View style={styles.progressContainer}>
             <View style={styles.progressBar}>
               <View
-                style={[styles.progressFill, { width: `${Math.min(item.percentage, 100)}%`, backgroundColor: resultColor }]}
+                style={[styles.progressFill, { 
+                  width: item.percentage !== null ? `${Math.min(item.percentage, 100)}%` : '0%', 
+                  backgroundColor: resultColor 
+                }]}
               />
             </View>
-            <Text style={[styles.percentageText, { color: resultColor }]}>{item.percentage.toFixed(0)}%</Text>
+            <Text style={[styles.percentageText, { color: resultColor }]}>
+              {item.percentage !== null ? `${item.percentage.toFixed(0)}%` : 'N/A'}
+            </Text>
           </View>
         </View>
 
@@ -432,13 +452,14 @@ export default function HistoryScreen() {
     }
 
     // Apply status filter
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter((audit) => {
+    if (statusFilter !== 'all') {      filtered = filtered.filter((audit) => {
         const status = audit.status.toLowerCase();
         if (statusFilter === 'pending') {
-          return status.includes('pending') || status.includes('draft') || status.includes('in_progress');
-        } else if (statusFilter === 'complete') {
+          return status.includes('pending') || status.includes('in_progress');
+        } else if (statusFilter === 'completed') {
           return status.includes('completed') || status.includes('done');
+        } else if (statusFilter === 'draft') {
+          return status.includes('draft');
         }
         return true;
       });
@@ -494,9 +515,7 @@ export default function HistoryScreen() {
               onPress={() => setStatusFilter('all')}
             >
               <Text style={[styles.filterText, statusFilter === 'all' && styles.filterTextActive]}>All</Text>
-            </Pressable>
-
-            <Pressable
+            </Pressable>            <Pressable
               style={[styles.filterButton, statusFilter === 'pending' && styles.filterButtonActive]}
               onPress={() => setStatusFilter('pending')}
             >
@@ -504,10 +523,17 @@ export default function HistoryScreen() {
             </Pressable>
 
             <Pressable
-              style={[styles.filterButton, statusFilter === 'complete' && styles.filterButtonActive]}
-              onPress={() => setStatusFilter('complete')}
+              style={[styles.filterButton, statusFilter === 'completed' && styles.filterButtonActive]}
+              onPress={() => setStatusFilter('completed')}
             >
-              <Text style={[styles.filterText, statusFilter === 'complete' && styles.filterTextActive]}>Complete</Text>
+              <Text style={[styles.filterText, statusFilter === 'completed' && styles.filterTextActive]}>Completed</Text>
+            </Pressable>
+
+            <Pressable
+              style={[styles.filterButton, statusFilter === 'draft' && styles.filterButtonActive]}
+              onPress={() => setStatusFilter('draft')}
+            >
+              <Text style={[styles.filterText, statusFilter === 'draft' && styles.filterTextActive]}>Draft</Text>
             </Pressable>
           </View>
         </View>
@@ -573,19 +599,18 @@ export default function HistoryScreen() {
                       <Text style={styles.formName}>
                         {selectedAudit.form?.form_schema?.title ?? 'Unknown Form'}
                       </Text>
-                    </View>
-                    <View style={styles.statusGroup}>
+                    </View>                    <View style={styles.statusGroup}>
                       {/* Result Badge */}
                       <View
-                        style={[styles.statusChip, { backgroundColor: getResultBackgroundColor(selectedAudit.result) }]}
+                        style={[styles.statusChip, { backgroundColor: getResultBackgroundColor(selectedAudit.result || 'draft') }]}
                       >
                         <MaterialIcons
-                          name={getResultIcon(selectedAudit.result) as any}
+                          name={getResultIcon(selectedAudit.result || 'draft') as any}
                           size={16}
-                          color={getResultColor(selectedAudit.result)}
+                          color={getResultColor(selectedAudit.result || 'draft')}
                         />
-                        <Text style={[styles.statusText, { color: getResultColor(selectedAudit.result) }]}>
-                          {selectedAudit.result.toUpperCase()}
+                        <Text style={[styles.statusText, { color: getResultColor(selectedAudit.result || 'draft') }]}>
+                          {selectedAudit.result ? selectedAudit.result.toUpperCase() : 'DRAFT'}
                         </Text>
                       </View>
 
@@ -598,13 +623,15 @@ export default function HistoryScreen() {
                         </Text>
                       </View>
                     </View>
-                  </View>
-
-                  {/* Score Section */}
+                  </View>                  {/* Score Section */}
                   <View style={styles.scoreCard}>
                     <View style={styles.scoreInfo}>
-                      <Text style={styles.scoreNumber}>{selectedAudit.marks}</Text>
-                      <Text style={styles.scorePercentage}>{selectedAudit.percentage.toFixed(1)}%</Text>
+                      <Text style={styles.scoreNumber}>
+                        {selectedAudit.marks !== null ? selectedAudit.marks : '--'}
+                      </Text>
+                      <Text style={styles.scorePercentage}>
+                        {selectedAudit.percentage !== null ? `${selectedAudit.percentage.toFixed(1)}%` : 'Draft'}
+                      </Text>
                     </View>
                     <Text style={styles.scoreLabel}>Score</Text>
                   </View>
@@ -631,14 +658,25 @@ export default function HistoryScreen() {
                       <Text style={styles.commentsText}>{selectedAudit.comments}</Text>
                     </View>
                   )}
-                </View>
-
-                {/* Action Buttons */}
+                </View>                {/* Action Buttons */}
                 <View style={styles.actionButtons}>
-                  <Pressable style={[styles.actionButton, styles.viewButton]} onPress={handleViewDetails}>
-                    <MaterialIcons name="visibility" size={20} color="#ffffff" />
-                    <Text style={[styles.actionButtonText, styles.viewButtonText]}>View Audit</Text>
-                  </Pressable>
+                  {selectedAudit.status === 'draft' ? (
+                    <>
+                      <Pressable style={[styles.actionButton, styles.editButton]} onPress={handleEditDraft}>
+                        <MaterialIcons name="edit" size={20} color="#ffffff" />
+                        <Text style={[styles.actionButtonText, styles.editButtonText]}>Continue</Text>
+                      </Pressable>
+                      <Pressable style={[styles.actionButton, styles.viewButton]} onPress={handleViewDetails}>
+                        <MaterialIcons name="visibility" size={20} color="#ffffff" />
+                        <Text style={[styles.actionButtonText, styles.viewButtonText]}>View Draft</Text>
+                      </Pressable>
+                    </>
+                  ) : (
+                    <Pressable style={[styles.actionButton, styles.viewButton]} onPress={handleViewDetails}>
+                      <MaterialIcons name="visibility" size={20} color="#ffffff" />
+                      <Text style={[styles.actionButtonText, styles.viewButtonText]}>View Audit</Text>
+                    </Pressable>
+                  )}
                 </View>
 
                 {/* Cancel Button */}
@@ -1013,27 +1051,34 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#64748b',
     lineHeight: 20,
-  },
-  actionButtons: {
+  },  actionButtons: {
     paddingHorizontal: 24,
     paddingBottom: 24,
+    flexDirection: 'row',
+    gap: 12,
   },
   actionButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 16,
     borderRadius: 12,
     gap: 8,
-  },
-  viewButton: {
+  },  viewButton: {
     backgroundColor: '#3b82f6',
+  },
+  editButton: {
+    backgroundColor: '#8b5cf6',
   },
   actionButtonText: {
     fontSize: 16,
     fontWeight: '600',
   },
   viewButtonText: {
+    color: '#ffffff',
+  },
+  editButtonText: {
     color: '#ffffff',
   },
   cancelButton: {
