@@ -4,6 +4,7 @@ import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } f
 import Card from '../../components/Card'
 import ListItem from '../../components/ListItem'
 import Screen from '../../components/Screen'
+import SearchBar from '../../components/SearchBar'
 import StatusBadge from '../../components/StatusBadge'
 import { supabase } from '../../lib/supabase'
 
@@ -18,6 +19,7 @@ const Audit = () => {
   const [compliances, setCompliances] = useState<ComplianceRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
 
   const fetchCompliances = async () => {
     try {
@@ -81,8 +83,23 @@ const Audit = () => {
 
   const onRefresh = () => {
     setRefreshing(true)
+    setSearchQuery('') // Clear search when refreshing
     fetchCompliances()
   }
+
+  // Filter compliances based on search query
+  const getFilteredCompliances = () => {
+    if (!searchQuery.trim()) {
+      return compliances;
+    }
+    
+    const query = searchQuery.toLowerCase();
+    return compliances.filter((compliance) => {
+      const name = compliance.name?.toLowerCase() ?? '';
+      const description = compliance.description?.toLowerCase() ?? '';
+      return name.includes(query) || description.includes(query);
+    });
+  };
 
   const renderComplianceItem = ({ item }: { item: ComplianceRecord }) => (
     <ListItem
@@ -94,14 +111,27 @@ const Audit = () => {
     />
   )
 
-  const renderEmptyState = () => (
-    <Card style={styles.emptyCard}>
-      <Text style={styles.emptyTitle}>No Active Compliance Records</Text>
-      <Text style={styles.emptyDescription}>
-        There are no active compliance records available at the moment. Contact your administrator to activate compliance forms.
-      </Text>
-    </Card>
-  )
+  const renderEmptyState = () => {
+    if (searchQuery.trim()) {
+      return (
+        <Card style={styles.emptyCard}>
+          <Text style={styles.emptyTitle}>No Results Found</Text>
+          <Text style={styles.emptyDescription}>
+            No compliance forms match your search for "{searchQuery}". Try a different search term.
+          </Text>
+        </Card>
+      );
+    }
+    
+    return (
+      <Card style={styles.emptyCard}>
+        <Text style={styles.emptyTitle}>No Active Compliance Records</Text>
+        <Text style={styles.emptyDescription}>
+          There are no active compliance records available at the moment. Contact your administrator to activate compliance forms.
+        </Text>
+      </Card>
+    );
+  }
 
   if (loading) {
     return (
@@ -121,8 +151,15 @@ const Audit = () => {
         <Text style={styles.subtitle}>Active compliance forms available for audit</Text>
       </View>
 
+      <SearchBar
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+        placeholder="Search compliance forms by name or description..."
+        onClear={() => setSearchQuery('')}
+      />
+
       <FlatList
-        data={compliances}
+        data={getFilteredCompliances()}
         keyExtractor={item => item.id.toString()}
         renderItem={renderComplianceItem}
         ListEmptyComponent={renderEmptyState}

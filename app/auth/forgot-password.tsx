@@ -34,18 +34,24 @@ export default function ForgotPassword() {
     }
 
     setLoading(true);
-    
-    try {
+      try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: 'https://yourapp.com/reset-password', // Replace with your reset URL
-      });
-
-      if (error) {
-        showAlert('Error', error.message);
+        redirectTo: `${process.env.EXPO_PUBLIC_SITE_URL || 'https://smart-comply-app.vercel.app'}/auth/reset-password`,
+      });      if (error) {
+        // Don't reveal if email exists or not for security
+        if (error.message.includes('User not found') || error.message.includes('not found')) {
+          showAlert(
+            'Reset Email Sent',
+            'If an account with this email exists, you will receive a password reset link shortly. Please check your email and spam folder.',
+            () => router.replace('/auth/login')
+          );
+        } else {
+          showAlert('Error', 'Unable to send reset email. Please try again later.');
+        }
       } else {
         showAlert(
           'Reset Email Sent',
-          'Please check your email for password reset instructions. If you don\'t see it, check your spam folder.',
+          'Please check your email for password reset instructions. Click the link in the email to reset your password. The link will expire in 1 hour.\n\nIf you don\'t see the email, check your spam folder.',
           () => router.replace('/auth/login')
         );
       }
