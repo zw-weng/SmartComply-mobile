@@ -5,16 +5,16 @@ import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 import BackButton from '../../../components/BackButton';
 import Screen from '../../../components/Screen';
@@ -66,9 +66,9 @@ export default function FormScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isEditing, setIsEditing] = useState(false);  const [isViewMode, setIsViewMode] = useState(mode === 'view');
-  const [existingAuditId, setExistingAuditId] = useState<string | null>(null);  const [uploadingImages, setUploadingImages] = useState<Record<string, boolean>>({});
-  const [showDatePicker, setShowDatePicker] = useState<string | null>(null);
+  const [existingAuditId, setExistingAuditId] = useState<string | null>(null);  const [uploadingImages, setUploadingImages] = useState<Record<string, boolean>>({});  const [showDatePicker, setShowDatePicker] = useState<string | null>(null);
   const [savingDraft, setSavingDraft] = useState(false);
+  const [showDescription, setShowDescription] = useState(false);
 
   const validateEmail = (email: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -750,9 +750,72 @@ export default function FormScreen() {
         );
 
       case 'section':
-        return null;
+        return null;      case 'checkbox':
+        // Handle checkbox group if enhancedOptions exist
+        if (field.enhancedOptions && field.enhancedOptions.length > 0) {
+          const checkboxOptions = field.enhancedOptions.filter(opt => 
+            typeof opt.value === 'string' && opt.value.trim() !== ''
+          );
+          
+          if (checkboxOptions.length === 0) {
+            return (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>No valid options available for this checkbox group</Text>
+              </View>
+            );
+          }
 
-      case 'checkbox':
+          const selectedValues = Array.isArray(value) ? value : [];
+
+          return (
+            <View style={styles.checkboxGroupContainer}>
+              {checkboxOptions.map((option, index) => {
+                const isSelected = selectedValues.includes(option.value);
+                
+                return (
+                  <Pressable
+                    key={`${field.id}-checkbox-${option.value}-${index}`}
+                    style={[
+                      styles.checkboxGroupOption,
+                      isViewMode && styles.checkboxDisabled
+                    ]}
+                    onPress={() => {
+                      if (!isViewMode) {
+                        const newValues = isSelected
+                          ? selectedValues.filter(v => v !== option.value)
+                          : [...selectedValues, option.value];
+                        handleChange(field.id, newValues);
+                      }
+                    }}
+                  >
+                    <View style={[
+                      styles.checkbox,
+                      isSelected && styles.checkboxChecked,
+                      isViewMode && styles.checkboxViewMode
+                    ]}>
+                      {isSelected && (
+                        <MaterialIcons 
+                          name="check" 
+                          size={18} 
+                          color={isViewMode ? "#6b7280" : "#ffffff"} 
+                        />
+                      )}
+                    </View>
+                    <Text style={[
+                      styles.checkboxLabel,
+                      isViewMode && styles.checkboxLabelViewMode,
+                      option.isFailOption && styles.checkboxLabelFail
+                    ]}>
+                      {option.value}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          );
+        }
+
+        // Handle single checkbox (true/false)
         return (
           <View style={styles.checkboxContainer}>
             <Pressable
@@ -998,12 +1061,26 @@ export default function FormScreen() {
                 {isViewMode ? 'READ ONLY' : 'EDITING'}
               </Text>
             </View>
-          )}
-          <Text style={styles.title}>
+          )}          <Text style={styles.title}>
             {schema.title}
           </Text>
           {schema.description && (
-            <Text style={styles.description}>{schema.description}</Text>
+            <View style={styles.descriptionContainer}>
+              <Pressable 
+                style={styles.descriptionToggle}
+                onPress={() => setShowDescription(!showDescription)}
+              >
+                <Text style={styles.descriptionLabel}>Description</Text>
+                <MaterialIcons 
+                  name={showDescription ? "expand-less" : "expand-more"} 
+                  size={24} 
+                  color="#6b7280" 
+                />
+              </Pressable>
+              {showDescription && (
+                <Text style={styles.description}>{schema.description}</Text>
+              )}
+            </View>
           )}
           {isEditing && !isViewMode && (
             <View style={styles.editingNotice}>
@@ -1011,10 +1088,9 @@ export default function FormScreen() {
                 You are editing an existing audit. Make changes and resubmit.
               </Text>
             </View>
-          )}
-          <View style={styles.formInfo}>
+          )}          <View style={styles.formInfo}>
             <Text style={styles.formInfoText}>
-              {schema.fields.length} questions • Required fields are marked with *
+              {schema.fields.filter(f => f.type !== 'section' && !f.isSection).length + 2} questions • Required fields are marked with *
             </Text>
           </View>
         </View>
@@ -1059,8 +1135,7 @@ export default function FormScreen() {
           </View>
         </View>
 
-        {/* Form Fields */}
-        {schema.fields.map((field, index) => {
+        {/* Form Fields */}        {schema.fields.map((field, index) => {
           if (field.type === 'section' || field.isSection) {
             return (
               <View key={field.id} style={styles.sectionHeader}>
@@ -1072,10 +1147,13 @@ export default function FormScreen() {
             );
           }
 
+          // Calculate sequential question number (excluding sections)
+          const questionNumber = schema.fields.slice(0, index + 1).filter(f => f.type !== 'section' && !f.isSection).length + 1;
+
           return (
             <View key={field.id} style={styles.fieldCard}>
               <View style={styles.fieldHeader}>
-                <Text style={styles.fieldNumber}>{index + 2}.</Text>
+                <Text style={styles.fieldNumber}>{questionNumber}.</Text>
                 <View style={styles.fieldTitleContainer}>
                   <Text style={styles.fieldLabel}>
                     {field.label}
@@ -1094,12 +1172,10 @@ export default function FormScreen() {
               )}
             </View>
           );
-        })}
-
-        {/* Comments Field */}
+        })}        {/* Comments Field */}
         <View style={styles.fieldCard}>
           <View style={styles.fieldHeader}>
-            <Text style={styles.fieldNumber}>{schema.fields.length + 2}.</Text>
+            <Text style={styles.fieldNumber}>{schema.fields.filter(f => f.type !== 'section' && !f.isSection).length + 2}.</Text>
             <View style={styles.fieldTitleContainer}>
               <Text style={styles.fieldLabel}>
                 Comments
@@ -1212,11 +1288,28 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#1f2937',
     marginBottom: 8,
-  },
-  description: {
+  },  description: {
     fontSize: 16,
     color: '#6b7280',
     lineHeight: 24,
+    marginTop: 8,
+  },
+  descriptionContainer: {
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f3f4f6',
+    paddingTop: 12,
+  },
+  descriptionToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  descriptionLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#374151',
   },
   editingNotice: {
     backgroundColor: '#fef3c7',
@@ -1687,9 +1780,27 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#374151',
     flex: 1,
-  },
-  checkboxLabelViewMode: {
+  },  checkboxLabelViewMode: {
     color: '#6b7280',
+  },
+  checkboxLabelFail: {
+    color: '#ef4444',
+    fontWeight: '600',
+  },
+  // Checkbox group styles
+  checkboxGroupContainer: {
+    marginVertical: 8,
+  },
+  checkboxGroupOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#f9fafb',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    marginBottom: 8,
   },
   sectionHeader: {
     marginTop: 32,

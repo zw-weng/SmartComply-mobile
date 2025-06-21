@@ -154,7 +154,7 @@ const Audit = () => {
       <SearchBar
         value={searchQuery}
         onChangeText={setSearchQuery}
-        placeholder="Search compliance forms by name or description..."
+        placeholder="Search by name or description..."
         onClear={() => setSearchQuery('')}
       />
 
@@ -184,16 +184,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 16,
     paddingBottom: 24,
+    minHeight: 80, // Ensure minimum height for consistency
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
     color: '#1f2937',
     marginBottom: 4,
+    lineHeight: 36, // Better line height for readability
+    flexWrap: 'wrap', // Allow title to wrap if needed
   },
   subtitle: {
     fontSize: 16,
     color: '#6b7280',
+    lineHeight: 22, // Better line height for readability
+    flexWrap: 'wrap', // Allow subtitle to wrap if needed
   },
   loadingContainer: {
     flex: 1,
@@ -208,22 +213,28 @@ const styles = StyleSheet.create({
   listContainer: {
     paddingHorizontal: 16,
     paddingBottom: 120, // Account for redesigned tab bar
+    flexGrow: 1, // Ensure list can grow to accommodate content
   },
   emptyCard: {
     margin: 16,
     alignItems: 'center',
     paddingVertical: 32,
+    minHeight: 200, // Ensure minimum height for empty state
   },
   emptyTitle: {
     fontSize: 20,
     fontWeight: '600',
     color: '#374151',
     marginBottom: 8,
+    textAlign: 'center',
+    flexWrap: 'wrap', // Allow title to wrap if needed
   },
   emptyDescription: {
     fontSize: 16,
     color: '#6b7280',
     textAlign: 'center',
     lineHeight: 24,
+    flexWrap: 'wrap', // Allow description to wrap
+    paddingHorizontal: 16, // Add padding to prevent edge touching
   },
 })
