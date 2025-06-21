@@ -1,9 +1,10 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import NetInfo from '@react-native-community/netinfo';
 import { Picker } from '@react-native-picker/picker';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -69,6 +70,13 @@ export default function FormScreen() {
   const [existingAuditId, setExistingAuditId] = useState<string | null>(null);  const [uploadingImages, setUploadingImages] = useState<Record<string, boolean>>({});  const [showDatePicker, setShowDatePicker] = useState<string | null>(null);
   const [savingDraft, setSavingDraft] = useState(false);
   const [showDescription, setShowDescription] = useState(false);
+  
+  // Auto-save related state
+  const [isConnected, setIsConnected] = useState(true);
+  const [lastAutoSave, setLastAutoSave] = useState<Date | null>(null);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastValuesRef = useRef<Record<string, any>>({});
 
   const validateEmail = (email: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -314,13 +322,16 @@ export default function FormScreen() {
     
     return () => {
       isMounted = false;
-    };
-  }, [formId, auditId, user?.id]);
-
+    };  }, [formId, auditId, user?.id]);
   const handleChange = (fieldId: string, value: any) => {
     setValues(prev => ({ ...prev, [fieldId]: value }));
     if (errors[fieldId]) {
       setErrors(prev => ({ ...prev, [fieldId]: '' }));
+    }
+    
+    // Trigger debounced auto-save when values change
+    if (auditTitle.trim() && user?.id) {
+      debouncedAutoSave();
     }
   };
   const validateForm = () => {
@@ -390,7 +401,6 @@ export default function FormScreen() {
     const passPercentage = maxScore > 0 ? (totalScore / maxScore) * 100 : 0;
     return { totalScore, maxScore, passPercentage };
   };
-
   const formatResultForDisplay = (result: string): string => {
     switch (result.toLowerCase()) {
       case 'pass': return 'PASSED';
@@ -399,7 +409,143 @@ export default function FormScreen() {
       case 'fail': return 'FAILED';
       default: return result.toUpperCase();
     }
-  };  const submitForm = async (isDraft: boolean = false) => {
+  };
+
+  // Auto-save function
+  const autoSave = useCallback(async (showNotification: boolean = false) => {
+    if (!user || !auditTitle.trim() || autoSaving || savingDraft || submitting) {
+      return;
+    }
+
+    // Don't auto-save if values haven't changed
+    const currentValuesString = JSON.stringify(values);
+    const lastValuesString = JSON.stringify(lastValuesRef.current);
+    if (currentValuesString === lastValuesString && !showNotification) {
+      return;
+    }
+
+    setAutoSaving(true);
+    try {
+      let auditData, auditError;
+      if (isEditing && existingAuditId) {
+        const updateResult = await supabase
+          .from('audit')
+          .update({
+            title: auditTitle.trim(),
+            status: 'draft',
+            result: null,
+            marks: null,
+            percentage: null,
+            comments: userComments || '',
+            audit_data: values,
+            last_edit_at: new Date().toISOString(),
+          })
+          .eq('id', existingAuditId)
+          .eq('user_id', user.id)
+          .select()
+          .single();
+
+        auditData = updateResult.data;
+        auditError = updateResult.error;
+      } else {
+        const insertResult = await supabase
+          .from('audit')
+          .insert({
+            form_id: parseInt(formId as string),
+            user_id: user.id,
+            title: auditTitle.trim(),
+            status: 'draft',
+            result: null,
+            marks: null,
+            percentage: null,
+            comments: userComments || null,
+            audit_data: values,
+          })
+          .select()
+          .single();
+
+        auditData = insertResult.data;
+        auditError = insertResult.error;
+        
+        // If this was a new audit, set it as editing mode
+        if (auditData && !auditError) {
+          setIsEditing(true);
+          setExistingAuditId(auditData.id);
+        }
+      }
+
+      if (!auditError) {
+        lastValuesRef.current = { ...values };
+        setLastAutoSave(new Date());
+        
+        if (showNotification) {
+          Alert.alert('Auto-saved', 'Your progress has been automatically saved as a draft.');
+        }
+      }
+    } catch (error) {
+      console.error('Auto-save failed:', error);
+    } finally {
+      setAutoSaving(false);
+    }
+  }, [user, auditTitle, values, userComments, autoSaving, savingDraft, submitting, isEditing, existingAuditId, formId]);
+
+  // Debounced auto-save
+  const debouncedAutoSave = useCallback(() => {
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current);
+    }
+    
+    autoSaveTimeoutRef.current = setTimeout(() => {
+      autoSave();    }, 3000); // Auto-save 3 seconds after user stops typing
+  }, [autoSave]);
+
+  // Network monitoring effect
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      const wasConnected = isConnected;
+      setIsConnected(state.isConnected ?? false);
+      
+      // If we just went offline, auto-save immediately
+      if (wasConnected && !state.isConnected && auditTitle.trim()) {
+        autoSave(true);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [isConnected, auditTitle, autoSave]);
+
+  // Auto-save on form changes
+  useEffect(() => {
+    if (auditTitle.trim() && user?.id) {
+      debouncedAutoSave();
+    }
+    
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+      }
+    };
+  }, [values, auditTitle, userComments, debouncedAutoSave, user?.id]);
+
+  // Periodic auto-save (every 2 minutes)
+  useEffect(() => {
+    if (!user?.id || !auditTitle.trim()) return;
+
+    const interval = setInterval(() => {
+      autoSave();
+    }, 120000); // 2 minutes    return () => clearInterval(interval);
+  }, [autoSave, user?.id, auditTitle]);
+
+  // Cleanup effect
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+      }
+    };
+  }, []);const submitForm = async (isDraft: boolean = false) => {
     if (!user) {
       Alert.alert('Authentication Required', 'You must be logged in to submit a form.');
       return;
@@ -1092,6 +1238,32 @@ export default function FormScreen() {
             <Text style={styles.formInfoText}>
               {schema.fields.filter(f => f.type !== 'section' && !f.isSection).length + 2} questions • Required fields are marked with *
             </Text>
+            
+            {/* Auto-save status indicator */}
+            <View style={styles.autoSaveContainer}>
+              {!isConnected && (
+                <View style={styles.offlineIndicator}>
+                  <MaterialIcons name="wifi-off" size={16} color="#ef4444" />
+                  <Text style={styles.offlineText}>Offline</Text>
+                </View>
+              )}
+              
+              {autoSaving && (
+                <View style={styles.autoSaveIndicator}>
+                  <ActivityIndicator size="small" color="#10b981" />
+                  <Text style={styles.autoSaveText}>Auto-saving...</Text>
+                </View>
+              )}
+              
+              {lastAutoSave && !autoSaving && (
+                <View style={styles.autoSaveIndicator}>
+                  <MaterialIcons name="cloud-done" size={16} color="#10b981" />
+                  <Text style={styles.autoSaveText}>
+                    Saved {lastAutoSave.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </Text>
+                </View>
+              )}
+            </View>
           </View>
         </View>
       </View>
@@ -1120,11 +1292,14 @@ export default function FormScreen() {
                 isViewMode && styles.inputReadOnly
               ]}
               placeholder="Enter audit title..."
-              value={auditTitle}
-              onChangeText={(text) => {
+              value={auditTitle}              onChangeText={(text) => {
                 setAuditTitle(text);
                 if (errors['auditTitle']) {
                   setErrors(prev => ({ ...prev, auditTitle: '' }));
+                }
+                // Trigger debounced auto-save when title changes
+                if (text.trim() && user?.id) {
+                  debouncedAutoSave();
                 }
               }}
               editable={!isViewMode}
@@ -1195,7 +1370,13 @@ export default function FormScreen() {
               ]}
               placeholder="Add any additional comments or observations..."
               value={userComments}
-              onChangeText={setUserComments}
+              onChangeText={(text) => {
+                setUserComments(text);
+                // Trigger debounced auto-save when comments change
+                if (auditTitle.trim() && user?.id) {
+                  debouncedAutoSave();
+                }
+              }}
               multiline={true}
               numberOfLines={4}
               textAlignVertical="top"
@@ -1204,15 +1385,14 @@ export default function FormScreen() {
           </View>
         </View>
       </ScrollView>      {!isViewMode && (
-        <View style={styles.submitContainer}>
-          <Pressable
-            style={[styles.draftButton, savingDraft && styles.draftButtonDisabled]}
+        <View style={styles.submitContainer}>          <Pressable
+            style={[styles.draftButton, (savingDraft || autoSaving) && styles.draftButtonDisabled]}
             onPress={saveDraft}
-            disabled={savingDraft || submitting}
+            disabled={savingDraft || submitting || autoSaving}
           >
             <MaterialIcons name="save" size={20} color="#6b7280" />
             <Text style={styles.draftButtonText}>
-              {savingDraft ? 'Saving...' : 'Save as Draft'}
+              {savingDraft ? 'Saving...' : autoSaving ? 'Auto-saving...' : 'Save as Draft'}
             </Text>
           </Pressable>
           
@@ -1900,8 +2080,42 @@ const styles = StyleSheet.create({
   },
   datePlaceholder: {
     color: '#9ca3af',
-  },
-  dateTextViewMode: {
+  },  dateTextViewMode: {
     color: '#6b7280',
+  },
+  // Auto-save styles
+  autoSaveContainer: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  offlineIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fee2e2',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  offlineText: {
+    fontSize: 12,
+    color: '#ef4444',
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+  autoSaveIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ecfdf5',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  autoSaveText: {
+    fontSize: 12,
+    color: '#10b981',
+    marginLeft: 4,
+    fontWeight: '500',
   },
 });
