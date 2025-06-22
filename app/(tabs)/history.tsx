@@ -43,25 +43,35 @@ interface AuditRecord {
 const { width } = Dimensions.get('window');
 
 export default function HistoryScreen() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [audits, setAudits] = useState<AuditRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedAudit, setSelectedAudit] = useState<AuditRecord | null>(null);
   const [showOptionsModal, setShowOptionsModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'completed' | 'draft'>('all');
-
-  const fetchAudits = async () => {
-    if (!user?.id) {
-      console.warn('No user ID found');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'completed' | 'draft'>('all');  const fetchAudits = async () => {
+    if (!user?.id || !profile?.tenant_id) {
+      console.warn('No user ID or tenant ID found');
+      console.warn('User ID:', user?.id);
+      console.warn('Profile:', profile);
+      console.warn('Tenant ID:', profile?.tenant_id);
       setLoading(false);
       setRefreshing(false);
       return;
     }
 
-    try {
-      // Fetch audits with form information
+    console.log('Fetching audits for user:', user.id, 'tenant:', profile.tenant_id);    try {
+      // First, let's check if there are any audits for this user without tenant filter (for debugging)
+      const { data: debugAudits, error: debugError } = await supabase
+        .from('audit')
+        .select('id, user_id, tenant_id, title, status')
+        .eq('user_id', user.id);
+      
+      console.log('Debug - All audits for user (no tenant filter):', debugAudits);
+      console.log('Debug - Error:', debugError);
+
+      // Fetch audits with form information, filtered by user and tenant
       const { data: auditsData, error: auditsError } = await supabase
         .from('audit')
         .select(`
@@ -71,21 +81,42 @@ export default function HistoryScreen() {
           )
         `)
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
+        .eq('tenant_id', profile.tenant_id)
+        .order('created_at', { ascending: false });      if (auditsError) throw auditsError;
 
-      if (auditsError) throw auditsError;
+      console.log('Audits data with tenant filter:', auditsData);
 
-      console.log('Audits data:', auditsData); // Log to inspect data structure
-
+      // If no audits found with tenant filter, try without tenant filter as fallback
+      // This handles the case where existing audits don't have tenant_id yet
+      let finalAuditsData = auditsData;
       if (!auditsData || auditsData.length === 0) {
+        console.log('No audits found with tenant filter, trying without tenant filter...');
+        const { data: fallbackAudits, error: fallbackError } = await supabase
+          .from('audit')
+          .select(`
+            *,
+            form:form_id (
+              form_schema
+            )
+          `)
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
+        
+        if (!fallbackError && fallbackAudits) {
+          console.log('Found audits without tenant filter:', fallbackAudits);
+          finalAuditsData = fallbackAudits;
+        }
+      }
+
+      console.log('Final audits data:', finalAuditsData);
+
+      if (!finalAuditsData || finalAuditsData.length === 0) {
         setAudits([]);
         setLoading(false);
         setRefreshing(false);
         return;
-      }
-
-      // Get unique user IDs from audits to fetch profiles
-      const userIds = [...new Set(auditsData.map((audit) => audit.user_id))];
+      }      // Get unique user IDs from audits to fetch profiles
+      const userIds = [...new Set(finalAuditsData.map((audit) => audit.user_id))];
       console.log('Fetching profiles for user IDs:', userIds);
 
       // Fetch profiles for all users who have audits
@@ -109,10 +140,8 @@ export default function HistoryScreen() {
 
       if (profilesError) {
         console.warn('Warning: Could not fetch profiles:', profilesError);
-      }
-
-      // Validate and merge audit data with profile data
-      const auditsWithProfiles = auditsData.map((audit) => {
+      }      // Validate and merge audit data with profile data
+      const auditsWithProfiles = finalAuditsData.map((audit) => {
         // Ensure critical fields are strings
         const validatedAudit = {
           ...audit,
@@ -148,10 +177,11 @@ export default function HistoryScreen() {
       setRefreshing(false);
     }
   };
-
   useEffect(() => {
-    fetchAudits();
-  }, [user?.id]);
+    if (user?.id && profile?.tenant_id) {
+      fetchAudits();
+    }
+  }, [user?.id, profile?.tenant_id]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);

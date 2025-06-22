@@ -31,7 +31,7 @@ interface RecentActivity {
 }
 
 export default function Index() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const [stats, setStats] = useState<DashboardStats>({
     totalAudits: 0,
     pendingAudits: 0,
@@ -46,13 +46,13 @@ export default function Index() {
   const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id && profile?.tenant_id) {
       fetchDashboardData()
     }
-  }, [user?.id])
+  }, [user?.id, profile?.tenant_id])
 
   const fetchDashboardData = async () => {
-    if (!user?.id) {
+    if (!user?.id || !profile?.tenant_id) {
       setLoading(false)
       setRefreshing(false)
       return
@@ -63,7 +63,7 @@ export default function Index() {
         setLoading(true)
       }
       
-      // Fetch all audits for the current user
+      // Fetch all audits for the current user and tenant
       const { data: auditsData, error: auditsError } = await supabase
         .from('audit')
         .select(`
@@ -73,6 +73,7 @@ export default function Index() {
           )
         `)
         .eq('user_id', user.id)
+        .eq('tenant_id', profile.tenant_id)
         .order('created_at', { ascending: false })
 
       if (auditsError) {
@@ -81,7 +82,31 @@ export default function Index() {
         return
       }
 
-      const audits = auditsData || []
+      console.log('Dashboard audits with tenant filter:', auditsData)
+
+      let finalAudits = auditsData || []
+
+      // If no audits found with tenant filter, try without tenant filter as fallback
+      if (finalAudits.length === 0) {
+        console.log('No audits found with tenant filter, trying without tenant filter for dashboard...')
+        const { data: fallbackAudits, error: fallbackError } = await supabase
+          .from('audit')
+          .select(`
+            *,
+            form:form_id (
+              form_schema
+            )
+          `)
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+        
+        if (!fallbackError && fallbackAudits) {
+          console.log('Found audits without tenant filter for dashboard:', fallbackAudits)
+          finalAudits = fallbackAudits
+        }
+      }
+
+      const audits = finalAudits
 
       // Debug: Log audit status and result values
       console.log('Audit data for statistics:', audits.map(audit => ({

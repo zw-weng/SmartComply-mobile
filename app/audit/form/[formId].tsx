@@ -1,14 +1,16 @@
 import { MaterialIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import NetInfo from '@react-native-community/netinfo';
 import { Picker } from '@react-native-picker/picker';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Image,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -49,6 +51,7 @@ interface FormRecord {
     description?: string;
     fields: FieldDef[];
   };
+  threshold?: number;
 }
 
 export default function FormScreen() {
@@ -57,9 +60,9 @@ export default function FormScreen() {
     formId: string;
     auditId?: string;
     mode?: 'view' | 'edit';
-  }>();
-  const { user } = useAuth();
+  }>();  const { user, profile } = useAuth();
   const [schema, setSchema] = useState<FormRecord['form_schema'] | null>(null);
+  const [formThreshold, setFormThreshold] = useState<number>(60); // Default threshold
   const [values, setValues] = useState<Record<string, any>>({});
   const [auditTitle, setAuditTitle] = useState('');
   const [userComments, setUserComments] = useState('');
@@ -67,20 +70,174 @@ export default function FormScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isEditing, setIsEditing] = useState(false);  const [isViewMode, setIsViewMode] = useState(mode === 'view');
-  const [existingAuditId, setExistingAuditId] = useState<string | null>(null);  const [uploadingImages, setUploadingImages] = useState<Record<string, boolean>>({});  const [showDatePicker, setShowDatePicker] = useState<string | null>(null);
-  const [savingDraft, setSavingDraft] = useState(false);
+  const [existingAuditId, setExistingAuditId] = useState<string | null>(null);  const [uploadingImages, setUploadingImages] = useState<Record<string, boolean>>({});  const [showDatePicker, setShowDatePicker] = useState<string | null>(null);  const [savingDraft, setSavingDraft] = useState(false);
   const [showDescription, setShowDescription] = useState(false);
-  
-  // Auto-save related state
-  const [isConnected, setIsConnected] = useState(true);
-  const [lastAutoSave, setLastAutoSave] = useState<Date | null>(null);
-  const [autoSaving, setAutoSaving] = useState(false);
-  const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastValuesRef = useRef<Record<string, any>>({});
+  const [hasOfflineSubmission, setHasOfflineSubmission] = useState(false);
+  // Auto-save state
+  const [isOnline, setIsOnline] = useState(true);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [autoSaveTimeoutId, setAutoSaveTimeoutId] = useState<NodeJS.Timeout | number | null>(null);  // Refs for keyboard handling
+  const scrollViewRef = useRef<ScrollView>(null);
+  const fieldPositions = useRef<Record<string, number>>({});
+
+  const scrollToField = (fieldId: string) => {
+    const fieldY = fieldPositions.current[fieldId];
+    if (fieldY !== undefined && scrollViewRef.current) {
+      scrollViewRef.current.scrollTo({
+        y: Math.max(0, fieldY - 120), // Offset to show field above keyboard
+        animated: true,
+      });
+    }
+  };
+
+  const handleFieldLayout = (fieldId: string, event: any) => {
+    const { y } = event.nativeEvent.layout;
+    fieldPositions.current[fieldId] = y;
+  };
 
   const validateEmail = (email: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
+  };
+  // Offline storage helpers
+  const saveOfflineData = async (data: any, isDraft: boolean = true) => {
+    try {
+      const keyType = isDraft ? 'draft' : 'submitted';
+      const offlineKey = `offline_audit_${keyType}_${formId}_${user?.id}_${profile?.tenant_id}`;
+      const offlineData = {
+        ...data,
+        timestamp: new Date().toISOString(),
+        isOffline: true,
+        isDraft,
+      };
+      await AsyncStorage.setItem(offlineKey, JSON.stringify(offlineData));
+      console.log(`${isDraft ? 'Draft' : 'Submitted audit'} saved offline successfully`);
+      return true;
+    } catch (error) {
+      console.error('Failed to save offline data:', error);
+      return false;
+    }
+  };
+  const getOfflineData = async (isDraft: boolean = true) => {
+    try {
+      const keyType = isDraft ? 'draft' : 'submitted';
+      const offlineKey = `offline_audit_${keyType}_${formId}_${user?.id}_${profile?.tenant_id}`;
+      const offlineDataString = await AsyncStorage.getItem(offlineKey);
+      if (offlineDataString) {
+        return JSON.parse(offlineDataString);
+      }
+      return null;
+    } catch (error) {
+      console.error('Failed to get offline data:', error);
+      return null;
+    }
+  };
+  const clearOfflineData = async (isDraft: boolean = true) => {
+    try {
+      const keyType = isDraft ? 'draft' : 'submitted';
+      const offlineKey = `offline_audit_${keyType}_${formId}_${user?.id}_${profile?.tenant_id}`;
+      await AsyncStorage.removeItem(offlineKey);
+      console.log(`Offline ${isDraft ? 'draft' : 'submitted audit'} data cleared`);
+    } catch (error) {
+      console.error('Failed to clear offline data:', error);
+    }
+  };
+  const syncOfflineData = async () => {
+    try {
+      let anyDataSynced = false;
+      
+      // Sync draft data first
+      const offlineDraft = await getOfflineData(true);
+      if (offlineDraft && offlineDraft.isOffline) {
+        console.log('Syncing offline draft data...');
+        // Use the offline data to restore form state
+        setValues(offlineDraft.audit_data || {});
+        setAuditTitle(offlineDraft.title || '');
+        setUserComments(offlineDraft.comments || '');
+        
+        // Try to save draft to server
+        const draftSuccess = await saveDraftSilently();
+        if (draftSuccess) {
+          await clearOfflineData(true);
+          console.log('Offline draft data synced successfully');
+          anyDataSynced = true;
+        }
+      }
+      
+      // Sync submitted audit data
+      const offlineSubmitted = await getOfflineData(false);
+      if (offlineSubmitted && offlineSubmitted.isOffline) {
+        console.log('Syncing offline submitted audit data...');
+        try {
+          let auditData, auditError;
+          
+          if (offlineSubmitted.existingAuditId) {
+            // Update existing audit
+            const updateResult = await supabase
+              .from('audit')
+              .update({
+                title: offlineSubmitted.title,
+                status: offlineSubmitted.status,
+                result: offlineSubmitted.result,
+                marks: offlineSubmitted.marks,
+                percentage: offlineSubmitted.percentage,
+                comments: offlineSubmitted.comments,
+                audit_data: offlineSubmitted.audit_data,
+                last_edit_at: new Date().toISOString(),
+              })
+              .eq('id', offlineSubmitted.existingAuditId)
+              .eq('user_id', user?.id)
+              .select()
+              .single();
+
+            auditData = updateResult.data;
+            auditError = updateResult.error;
+          } else {
+            // Create new audit
+            const insertResult = await supabase
+              .from('audit')
+              .insert({
+                form_id: offlineSubmitted.form_id,
+                user_id: offlineSubmitted.user_id,
+                tenant_id: offlineSubmitted.tenant_id,
+                title: offlineSubmitted.title,
+                status: offlineSubmitted.status,
+                result: offlineSubmitted.result,
+                marks: offlineSubmitted.marks,
+                percentage: offlineSubmitted.percentage,
+                comments: offlineSubmitted.comments,
+                audit_data: offlineSubmitted.audit_data,
+              })
+              .select()
+              .single();
+
+            auditData = insertResult.data;
+            auditError = insertResult.error;
+          }
+            if (!auditError && auditData) {
+            await clearOfflineData(false);
+            console.log('Offline submitted audit synced successfully');
+            anyDataSynced = true;
+            setHasOfflineSubmission(false); // Clear the indicator
+            
+            // Show success message to user
+            Alert.alert(
+              'Sync Complete',
+              'Your offline audit has been successfully submitted and synced.',
+              [{ text: 'OK' }]
+            );
+          }
+        } catch (error) {
+          console.error('Failed to sync offline submitted audit:', error);
+        }
+      }
+      
+      return anyDataSynced;
+    } catch (error) {
+      console.error('Failed to sync offline data:', error);
+      return false;
+    }
   };
 
   const testStorageBucket = async () => {
@@ -256,10 +413,9 @@ export default function FormScreen() {
       if (!isMounted) return;
       
       setLoading(true);
-      try {
-        const { data: formData, error: formError } = await supabase
+      try {        const { data: formData, error: formError } = await supabase
           .from('form')
-          .select('form_schema')
+          .select('form_schema, threshold')
           .eq('id', formId)
           .single();
 
@@ -270,6 +426,7 @@ export default function FormScreen() {
         }
 
         setSchema(formData.form_schema as FormRecord['form_schema']);
+        setFormThreshold(formData.threshold || 60); // Default to 60% if no threshold set
 
         const initial: Record<string, any> = {};
         formData.form_schema.fields.forEach((field: FieldDef) => {
@@ -322,17 +479,13 @@ export default function FormScreen() {
     
     return () => {
       isMounted = false;
-    };  }, [formId, auditId, user?.id]);
-  const handleChange = (fieldId: string, value: any) => {
+    };
+  }, [formId, auditId, user?.id]);  const handleChange = (fieldId: string, value: any) => {
     setValues(prev => ({ ...prev, [fieldId]: value }));
     if (errors[fieldId]) {
       setErrors(prev => ({ ...prev, [fieldId]: '' }));
     }
-    
-    // Trigger debounced auto-save when values change
-    if (auditTitle.trim() && user?.id) {
-      debouncedAutoSave();
-    }
+    // Auto-save is only triggered when going offline, not during normal editing
   };
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -371,36 +524,55 @@ export default function FormScreen() {
       }
     }
     return { isFail: false };
-  };
-
-  const calculateScore = () => {
+  };  const calculateScore = () => {
     if (!schema) return { totalScore: 0, maxScore: 0, passPercentage: 0 };
 
     let totalScore = 0;
     let maxScore = 0;
+    
     schema.fields.forEach(field => {
       if (field.type === 'section' || field.isSection) return;
 
       const userValue = values[field.id];
       const fieldWeight = field.weight || field.weightage || 1;
 
-      if (field.enhancedOptions && userValue) {
-        const selectedOption = field.enhancedOptions.find(opt => opt.value === userValue);
-        if (selectedOption) {
-          totalScore += selectedOption.points * fieldWeight;
+      if (field.enhancedOptions && field.enhancedOptions.length > 0) {
+        // Only score fields that have enhancedOptions configuration
+        if (field.type === 'checkbox' && Array.isArray(userValue)) {
+          // Checkbox group - sum up points for selected options
+          userValue.forEach(selectedValue => {
+            const selectedOption = field.enhancedOptions?.find(opt => opt.value === selectedValue);
+            if (selectedOption) {
+              totalScore += selectedOption.points * fieldWeight;
+            }
+          });
+          // Max possible is the sum of all option points for checkbox groups
+          const maxFieldPoints = field.enhancedOptions.reduce((sum, opt) => sum + opt.points, 0);
+          maxScore += maxFieldPoints * fieldWeight;
+        } else if (userValue) {
+          // Single select (dropdown/radio/single checkbox with enhancedOptions)
+          const selectedOption = field.enhancedOptions.find(opt => opt.value === userValue);
+          if (selectedOption) {
+            totalScore += selectedOption.points * fieldWeight;
+          }
+          // Max possible is the highest option mark for single select
+          const maxFieldPoints = Math.max(...field.enhancedOptions.map(opt => opt.points));
+          maxScore += maxFieldPoints * fieldWeight;
+        } else {
+          // No selection - max possible is still calculated for proper percentage
+          const maxFieldPoints = field.type === 'checkbox' 
+            ? field.enhancedOptions.reduce((sum, opt) => sum + opt.points, 0)
+            : Math.max(...field.enhancedOptions.map(opt => opt.points));
+          maxScore += maxFieldPoints * fieldWeight;
         }
-        const maxPoints = Math.max(...field.enhancedOptions.map(opt => opt.points));
-        maxScore += maxPoints * fieldWeight;
-      } else if ((field.type === 'boolean' || field.type === 'checkbox') && userValue !== undefined) {
-        const points = userValue === true ? 1 : 0;
-        totalScore += points * fieldWeight;
-        maxScore += 1 * fieldWeight;
       }
+      // Skip fields without enhancedOptions - they don't contribute to scoring
     });
 
     const passPercentage = maxScore > 0 ? (totalScore / maxScore) * 100 : 0;
     return { totalScore, maxScore, passPercentage };
   };
+
   const formatResultForDisplay = (result: string): string => {
     switch (result.toLowerCase()) {
       case 'pass': return 'PASSED';
@@ -409,143 +581,7 @@ export default function FormScreen() {
       case 'fail': return 'FAILED';
       default: return result.toUpperCase();
     }
-  };
-
-  // Auto-save function
-  const autoSave = useCallback(async (showNotification: boolean = false) => {
-    if (!user || !auditTitle.trim() || autoSaving || savingDraft || submitting) {
-      return;
-    }
-
-    // Don't auto-save if values haven't changed
-    const currentValuesString = JSON.stringify(values);
-    const lastValuesString = JSON.stringify(lastValuesRef.current);
-    if (currentValuesString === lastValuesString && !showNotification) {
-      return;
-    }
-
-    setAutoSaving(true);
-    try {
-      let auditData, auditError;
-      if (isEditing && existingAuditId) {
-        const updateResult = await supabase
-          .from('audit')
-          .update({
-            title: auditTitle.trim(),
-            status: 'draft',
-            result: null,
-            marks: null,
-            percentage: null,
-            comments: userComments || '',
-            audit_data: values,
-            last_edit_at: new Date().toISOString(),
-          })
-          .eq('id', existingAuditId)
-          .eq('user_id', user.id)
-          .select()
-          .single();
-
-        auditData = updateResult.data;
-        auditError = updateResult.error;
-      } else {
-        const insertResult = await supabase
-          .from('audit')
-          .insert({
-            form_id: parseInt(formId as string),
-            user_id: user.id,
-            title: auditTitle.trim(),
-            status: 'draft',
-            result: null,
-            marks: null,
-            percentage: null,
-            comments: userComments || null,
-            audit_data: values,
-          })
-          .select()
-          .single();
-
-        auditData = insertResult.data;
-        auditError = insertResult.error;
-        
-        // If this was a new audit, set it as editing mode
-        if (auditData && !auditError) {
-          setIsEditing(true);
-          setExistingAuditId(auditData.id);
-        }
-      }
-
-      if (!auditError) {
-        lastValuesRef.current = { ...values };
-        setLastAutoSave(new Date());
-        
-        if (showNotification) {
-          Alert.alert('Auto-saved', 'Your progress has been automatically saved as a draft.');
-        }
-      }
-    } catch (error) {
-      console.error('Auto-save failed:', error);
-    } finally {
-      setAutoSaving(false);
-    }
-  }, [user, auditTitle, values, userComments, autoSaving, savingDraft, submitting, isEditing, existingAuditId, formId]);
-
-  // Debounced auto-save
-  const debouncedAutoSave = useCallback(() => {
-    if (autoSaveTimeoutRef.current) {
-      clearTimeout(autoSaveTimeoutRef.current);
-    }
-    
-    autoSaveTimeoutRef.current = setTimeout(() => {
-      autoSave();    }, 3000); // Auto-save 3 seconds after user stops typing
-  }, [autoSave]);
-
-  // Network monitoring effect
-  useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener(state => {
-      const wasConnected = isConnected;
-      setIsConnected(state.isConnected ?? false);
-      
-      // If we just went offline, auto-save immediately
-      if (wasConnected && !state.isConnected && auditTitle.trim()) {
-        autoSave(true);
-      }
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, [isConnected, auditTitle, autoSave]);
-
-  // Auto-save on form changes
-  useEffect(() => {
-    if (auditTitle.trim() && user?.id) {
-      debouncedAutoSave();
-    }
-    
-    return () => {
-      if (autoSaveTimeoutRef.current) {
-        clearTimeout(autoSaveTimeoutRef.current);
-      }
-    };
-  }, [values, auditTitle, userComments, debouncedAutoSave, user?.id]);
-
-  // Periodic auto-save (every 2 minutes)
-  useEffect(() => {
-    if (!user?.id || !auditTitle.trim()) return;
-
-    const interval = setInterval(() => {
-      autoSave();
-    }, 120000); // 2 minutes    return () => clearInterval(interval);
-  }, [autoSave, user?.id, auditTitle]);
-
-  // Cleanup effect
-  useEffect(() => {
-    return () => {
-      if (autoSaveTimeoutRef.current) {
-        clearTimeout(autoSaveTimeoutRef.current);
-      }
-    };
-  }, []);const submitForm = async (isDraft: boolean = false) => {
+  };  const submitForm = async (isDraft: boolean = false) => {
     if (!user) {
       Alert.alert('Authentication Required', 'You must be logged in to submit a form.');
       return;
@@ -557,12 +593,14 @@ export default function FormScreen() {
       setSubmitting(true);
     }
     
-    try {
+    try {      
       const scoreResult = calculateScore();
       const autoFailCheck = checkAutoFail();
       let finalMarks = Math.round(scoreResult.totalScore * 100) / 100;
       let finalPercentage = Math.round(scoreResult.passPercentage * 100) / 100;
-      let finalResult = finalPercentage >= 60 ? 'pass' : 'failed';
+      
+      // Use form threshold instead of hardcoded 60%
+      let finalResult = finalPercentage >= formThreshold ? 'pass' : 'failed';
 
       if (autoFailCheck.isFail && !isDraft) {
         finalResult = 'failed';
@@ -575,9 +613,64 @@ export default function FormScreen() {
       if (isDraft) {
         finalStatus = 'draft';
       } else {
-        finalStatus = finalResult === 'pass' ? 'completed' : 'pending';
+        // All submitted audits go to "pending" status for manager verification
+        finalStatus = 'pending';
       }
 
+      const currentData = {
+        form_id: parseInt(formId as string),
+        user_id: user.id,
+        tenant_id: profile?.tenant_id,
+        title: auditTitle.trim(),
+        status: finalStatus,
+        result: isDraft ? null : finalResult,
+        marks: isDraft ? null : finalMarks,
+        percentage: isDraft ? null : finalPercentage,
+        comments: userComments || null,
+        audit_data: values,
+        existingAuditId: isEditing ? existingAuditId : null,
+      };      // Handle offline scenarios
+      if (!isOnline) {
+        const offlineSaved = await saveOfflineData(currentData, isDraft);
+        if (offlineSaved) {
+          setLastSaved(new Date());
+          setAutoSaveStatus('saved');
+          if (!isDraft) {
+            setHasOfflineSubmission(true); // Set indicator for offline submission
+          }
+          
+          if (isDraft) {
+            Alert.alert(
+              'Draft Saved Offline',
+              'Your audit draft has been saved offline. It will be synced when you\'re back online.',
+              [
+                {
+                  text: 'Continue Editing',
+                  style: 'default'
+                }
+              ]
+            );
+          } else {
+            Alert.alert(
+              'Audit Saved Offline',
+              'Your audit has been saved offline and will be submitted when you\'re back online.',
+              [
+                {
+                  text: 'View Audit History',
+                  onPress: () => {
+                    router.push('/(tabs)/history');
+                  }
+                }
+              ]
+            );
+          }
+          return;
+        } else {
+          throw new Error('Failed to save data offline');
+        }
+      }
+
+      // Online submission logic
       let auditData, auditError;
       if (isEditing && existingAuditId) {
         const updateResult = await supabase
@@ -600,11 +693,17 @@ export default function FormScreen() {
         auditData = updateResult.data;
         auditError = updateResult.error;
       } else {
+        // Ensure user has tenant_id from profile
+        if (!profile?.tenant_id) {
+          throw new Error('User tenant information not found. Please contact support.');
+        }
+
         const insertResult = await supabase
           .from('audit')
           .insert({
             form_id: parseInt(formId as string),
             user_id: user.id,
+            tenant_id: profile.tenant_id,
             title: auditTitle.trim(),
             status: finalStatus,
             result: isDraft ? null : finalResult,
@@ -620,7 +719,28 @@ export default function FormScreen() {
         auditError = insertResult.error;
       }
 
-      if (auditError) throw auditError;
+      if (auditError) {        // If network error during online submission, fallback to offline storage
+        if (auditError.message?.includes('Failed to fetch') || 
+            auditError.message?.includes('NetworkError') ||
+            auditError.message?.includes('fetch')) {
+          console.log('Network error during submission, saving offline...');
+          const offlineSaved = await saveOfflineData(currentData, isDraft);
+          if (offlineSaved) {
+            setLastSaved(new Date());
+            setAutoSaveStatus('saved');
+            if (!isDraft) {
+              setHasOfflineSubmission(true); // Set indicator for offline submission
+            }
+            Alert.alert(
+              'Saved Offline',
+              `Connection lost during submission. Your ${isDraft ? 'draft' : 'audit'} has been saved offline and will sync when connection is restored.`,
+              [{ text: 'OK' }]
+            );
+            return;
+          }
+        }
+        throw auditError;
+      }
 
       if (isDraft) {
         Alert.alert(
@@ -641,9 +761,12 @@ export default function FormScreen() {
         );
       } else {
         const actionText = isEditing ? 'updated' : 'submitted';
+        const thresholdText = `Threshold: ${formThreshold}%`;
+        const resultText = finalResult === 'pass' ? 'MEETS THRESHOLD' : 'BELOW THRESHOLD';
+        
         Alert.alert(
-          `Audit ${isEditing ? 'Updated' : 'Completed'}`,
-          `Form ${actionText} successfully!\n\nScore: ${finalMarks}/${scoreResult.maxScore}\nPercentage: ${finalPercentage.toFixed(1)}%\nResult: ${formatResultForDisplay(finalResult)}\nStatus: ${finalStatus.toUpperCase()}`,
+          `Audit ${isEditing ? 'Updated' : 'Submitted'}`,
+          `Form ${actionText} successfully and is now pending manager verification.\n\nScore: ${finalMarks}/${scoreResult.maxScore}\nPercentage: ${finalPercentage.toFixed(1)}%\n${thresholdText}\nResult: ${resultText}\nStatus: PENDING VERIFICATION`,
           [
             {
               text: 'View Audit History',
@@ -664,7 +787,9 @@ export default function FormScreen() {
         errorMessage = 'Invalid result value. The audit result does not meet database constraints.';
       } else if (error?.message?.includes('authentication')) {
         errorMessage = 'Authentication required. Please log in and try again.';
-      }      Alert.alert('Error', errorMessage);
+      }
+      
+      Alert.alert('Error', errorMessage);
     } finally {
       setSubmitting(false);
       setSavingDraft(false);
@@ -698,16 +823,221 @@ export default function FormScreen() {
     }
     
     await submitForm(true);
+  };  // Auto-save functions
+  const saveDraftSilently = async (): Promise<boolean> => {
+    if (!user || !profile?.tenant_id || !auditTitle.trim()) {
+      return false;
+    }
+
+    try {
+      setAutoSaveStatus('saving');
+      
+      const currentData = {
+        form_id: parseInt(formId as string),
+        user_id: user.id,
+        tenant_id: profile.tenant_id,
+        title: auditTitle.trim(),
+        status: 'draft',
+        result: null,
+        marks: null,
+        percentage: null,
+        comments: userComments || null,
+        audit_data: values,
+      };      // If offline, save to local storage
+      if (!isOnline) {
+        const offlineSaved = await saveOfflineData(currentData, true); // true for draft
+        if (offlineSaved) {
+          setLastSaved(new Date());
+          setAutoSaveStatus('saved');
+          console.log('Data saved offline - will sync when connection is restored');
+          return true;
+        } else {
+          setAutoSaveStatus('error');
+          return false;
+        }
+      }
+
+      let auditData, auditError;
+      
+      if (isEditing && existingAuditId) {
+        // Update existing audit
+        const updateResult = await supabase
+          .from('audit')
+          .update({
+            ...currentData,
+            last_edit_at: new Date().toISOString(),
+          })
+          .eq('id', existingAuditId)
+          .eq('user_id', user.id)
+          .eq('tenant_id', profile.tenant_id)
+          .select()
+          .single();
+
+        auditData = updateResult.data;
+        auditError = updateResult.error;
+      } else {
+        // Create new draft
+        const insertResult = await supabase
+          .from('audit')
+          .insert(currentData)
+          .select()
+          .single();
+
+        auditData = insertResult.data;
+        auditError = insertResult.error;
+        
+        if (!auditError && auditData) {
+          setIsEditing(true);
+          setExistingAuditId(auditData.id);
+        }
+      }
+
+      if (auditError) {        // Special handling for offline/network errors - fallback to offline storage
+        if (auditError.message?.includes('Failed to fetch') || 
+            auditError.message?.includes('NetworkError') ||
+            auditError.message?.includes('fetch')) {
+          console.log('Network error detected, saving offline...');
+          const offlineSaved = await saveOfflineData(currentData, true); // true for draft
+          if (offlineSaved) {
+            setLastSaved(new Date());
+            setAutoSaveStatus('saved');
+            console.log('Data saved offline due to network issues - will sync when connection is restored');
+            return true;
+          }
+        }
+        console.error('Auto-save error:', auditError);
+        setAutoSaveStatus('error');
+        return false;
+      }
+
+      setLastSaved(new Date());
+      setAutoSaveStatus('saved');
+      return true;
+    } catch (error) {
+      // Handle network errors gracefully - fallback to offline storage
+      if (error instanceof Error && 
+          (error.message.includes('Failed to fetch') || 
+           error.message.includes('NetworkError') ||
+           error.message.includes('fetch'))) {
+        console.log('Network error caught, saving offline...');
+        const currentData = {
+          form_id: parseInt(formId as string),
+          user_id: user.id,
+          tenant_id: profile.tenant_id,
+          title: auditTitle.trim(),
+          status: 'draft',
+          result: null,
+          marks: null,
+          percentage: null,
+          comments: userComments || null,
+          audit_data: values,
+        };        const offlineSaved = await saveOfflineData(currentData, true); // true for draft
+        if (offlineSaved) {
+          setLastSaved(new Date());
+          setAutoSaveStatus('saved');
+          console.log('Data saved offline due to network error - will sync when connection is restored');
+          return true;
+        }
+      }
+      console.error('Auto-save failed:', error);
+      setAutoSaveStatus('error');
+      return false;
+    }
   };
+  const debouncedAutoSave = () => {
+    if (autoSaveTimeoutId) {
+      clearTimeout(autoSaveTimeoutId);
+    }
+
+    const timeoutId = setTimeout(async () => {
+      if (!isViewMode) {
+        await saveDraftSilently();
+      }
+    }, 3000); // Auto-save after 3 seconds of inactivity
+
+    setAutoSaveTimeoutId(timeoutId);
+  };
+
+  const forceAutoSave = async () => {
+    if (isOnline && !isViewMode && auditTitle.trim()) {
+      await saveDraftSilently();
+    }
+  };  // Network monitoring effect
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      const wasOffline = !isOnline;
+      setIsOnline(state.isConnected ?? false);
+      
+      // Sync offline data when coming back online
+      if (wasOffline && state.isConnected) {
+        syncOfflineData().then(synced => {
+          if (synced) {
+            console.log('Offline data synced successfully');
+            setHasOfflineSubmission(false); // Clear offline submission indicator
+          } else if (auditTitle.trim()) {
+            // If no offline data but we have changes, force auto-save
+            forceAutoSave();
+          }
+        });
+      }
+    });
+
+    return () => unsubscribe();
+  }, [isOnline, auditTitle]);// Load offline data on mount
+  useEffect(() => {
+    const loadOfflineData = async () => {
+      if (user && profile?.tenant_id) {
+        // Check for offline draft data
+        const offlineData = await getOfflineData(true); // Load draft data
+        if (offlineData && offlineData.isOffline) {
+          console.log('Found offline draft data, restoring...');
+          setValues(offlineData.audit_data || {});
+          setAuditTitle(offlineData.title || '');
+          setUserComments(offlineData.comments || '');
+          setIsEditing(true);
+          console.log('Offline draft data restored - will sync when online');
+        }
+        
+        // Check for offline submitted data
+        const offlineSubmitted = await getOfflineData(false);
+        setHasOfflineSubmission(offlineSubmitted && offlineSubmitted.isOffline);
+      }
+    };
+
+    loadOfflineData();
+  }, [user, profile?.tenant_id]);
+  // Auto-save when form values change
+  useEffect(() => {
+    // Removed periodic auto-save - only save when going offline
+    // This prevents unnecessary server requests during normal editing
+  }, [values, auditTitle, userComments, isViewMode]);
+
+  // Cleanup auto-save timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimeoutId) {
+        clearTimeout(autoSaveTimeoutId);
+      }
+    };
+  }, [autoSaveTimeoutId]);
+  // Force auto-save when going offline
+  useEffect(() => {
+    if (!isOnline && auditTitle.trim() && !isViewMode) {
+      // Save immediately when going offline to preserve data
+      saveDraftSilently().then(success => {
+        if (success) {
+          console.log('Data saved offline successfully');
+        }
+      });
+    }
+  }, [isOnline]);
 
   const renderField = (field: FieldDef) => {
     const value = values[field.id];
     const hasError = !!errors[field.id];
 
-    switch (field.type) {
-      case 'text':
-      case 'textarea':
-        return (
+    switch (field.type) {      case 'text':
+      case 'textarea':        return (
           <TextInput
             style={[
               styles.input,
@@ -717,14 +1047,20 @@ export default function FormScreen() {
             placeholder={field.placeholder || ''}
             value={String(value || '')}
             onChangeText={(text) => handleChange(field.id, text)}
+            onFocus={() => {
+              if (!isViewMode) {
+                setTimeout(() => {
+                  scrollToField(field.id);
+                }, 100);
+              }
+            }}
             multiline={field.type === 'textarea'}
             numberOfLines={field.type === 'textarea' ? 4 : 1}
+            textAlignVertical={field.type === 'textarea' ? 'top' : 'center'}
             editable={!isViewMode}
+            autoCorrect={field.type === 'textarea'}
           />
-        );
-
-      case 'number':
-        return (
+        );      case 'number':        return (
           <TextInput
             style={[
               styles.input,
@@ -735,6 +1071,13 @@ export default function FormScreen() {
             keyboardType="numeric"
             value={String(value || '')}
             onChangeText={(text) => handleChange(field.id, Number(text) || 0)}
+            onFocus={() => {
+              if (!isViewMode) {
+                setTimeout(() => {
+                  scrollToField(field.id);
+                }, 100);
+              }
+            }}
             editable={!isViewMode}
           />
         );
@@ -798,25 +1141,25 @@ export default function FormScreen() {
           <View style={[
             styles.pickerContainer,
             hasError && styles.inputError,
-            isViewMode && styles.inputReadOnly
-          ]}>
+            isViewMode && styles.inputReadOnly          ]}>
             <Picker
               selectedValue={value || ''}
               onValueChange={(itemValue) => !isViewMode && handleChange(field.id, String(itemValue))}
-              style={styles.picker}
-              enabled={!isViewMode}
-            >
+              style={[styles.picker, isViewMode && styles.pickerReadOnly]}
+              enabled={!isViewMode}            >
               <Picker.Item
                 label={field.placeholder || 'Select an option...'}
                 value=""
-                color="#999"
+                color="#9ca3af"
+                style={{ fontSize: 16 }}
               />
               {validOptions.map((option, index) => (
                 <Picker.Item
                   key={`${field.id}-${option.value}-${index}`}
                   label={option.value}
                   value={option.value}
-                  color={option.isFailOption ? '#ef4444' : '#000'}
+                  color={option.isFailOption ? '#ef4444' : '#374151'}
+                  style={{ fontSize: 16 }}
                 />
               ))}
             </Picker>
@@ -991,10 +1334,7 @@ export default function FormScreen() {
                 {field.placeholder || 'Check this option'}
               </Text>
             </Pressable>          </View>
-        );
-
-      case 'email':
-        return (
+        );      case 'email':        return (
           <TextInput
             style={[
               styles.input,
@@ -1004,6 +1344,13 @@ export default function FormScreen() {
             placeholder={field.placeholder || 'Enter email address'}
             value={String(value || '')}
             onChangeText={(text) => handleChange(field.id, text)}
+            onFocus={() => {
+              if (!isViewMode) {
+                setTimeout(() => {
+                  scrollToField(field.id);
+                }, 100);
+              }
+            }}
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
@@ -1034,24 +1381,24 @@ export default function FormScreen() {
             styles.pickerContainer,
             hasError && styles.inputError,
             isViewMode && styles.inputReadOnly
-          ]}>
-            <Picker
+          ]}>            <Picker
               selectedValue={value || ''}
               onValueChange={(itemValue) => !isViewMode && handleChange(field.id, String(itemValue))}
-              style={styles.picker}
-              enabled={!isViewMode}
-            >
+              style={[styles.picker, isViewMode && styles.pickerReadOnly]}
+              enabled={!isViewMode}            >
               <Picker.Item
                 label={field.placeholder || 'Select an option...'}
                 value=""
-                color="#999"
+                color="#9ca3af"
+                style={{ fontSize: 16 }}
               />
               {validDropdownOptions.map((option, index) => (
                 <Picker.Item
                   key={`${field.id}-dropdown-${option.value}-${index}`}
                   label={option.value}
                   value={option.value}
-                  color={option.isFailOption ? '#ef4444' : '#000'}
+                  color={option.isFailOption ? '#ef4444' : '#374151'}
+                  style={{ fontSize: 16 }}
                 />
               ))}
             </Picker>
@@ -1181,7 +1528,6 @@ export default function FormScreen() {
       </Screen>
     );
   }
-
   return (
     <Screen style={styles.container}>
       <BackButton
@@ -1196,9 +1542,13 @@ export default function FormScreen() {
         style={styles.backButton}
       />
       
-      <View style={styles.header}>
-        <View style={styles.formTitleCard}>
-          {(isViewMode || isEditing) && (
+      <KeyboardAvoidingView 
+        style={styles.keyboardAvoidingView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+      >
+        <View style={styles.header}>
+          <View style={styles.formTitleCard}>{(isViewMode || isEditing) && (
             <View style={styles.modeIndicator}>
               <Text style={[
                 styles.modeText,
@@ -1207,7 +1557,52 @@ export default function FormScreen() {
                 {isViewMode ? 'READ ONLY' : 'EDITING'}
               </Text>
             </View>
-          )}          <Text style={styles.title}>
+          )}            {/* Auto-save status indicator - show offline status and pending submissions */}
+          {!isViewMode && (
+            <View style={styles.autoSaveIndicator}>
+              {!isOnline && (
+                <View style={styles.offlineIndicator}>
+                  <MaterialIcons name="wifi-off" size={16} color="#ef4444" />
+                  <Text style={styles.offlineText}>Offline</Text>
+                </View>
+              )}
+              {hasOfflineSubmission && (
+                <View style={styles.pendingSubmissionIndicator}>
+                  <MaterialIcons name="cloud-queue" size={16} color="#f59e0b" />
+                  <Text style={styles.pendingSubmissionText}>Pending Sync</Text>
+                </View>
+              )}
+              {!isOnline && autoSaveStatus !== 'idle' && (
+                <View style={[
+                  styles.autoSaveStatus,
+                  autoSaveStatus === 'saving' && styles.autoSaveStatusSaving,
+                  autoSaveStatus === 'saved' && styles.autoSaveStatusSaved,
+                  autoSaveStatus === 'error' && styles.autoSaveStatusError
+                ]}>
+                  {autoSaveStatus === 'saving' && (
+                    <>
+                      <ActivityIndicator size={12} color="#6b7280" />
+                      <Text style={styles.autoSaveText}>Saving offline...</Text>
+                    </>
+                  )}
+                  {autoSaveStatus === 'saved' && (
+                    <>
+                      <MaterialIcons name="check" size={16} color="#10b981" />
+                      <Text style={styles.autoSaveText}>
+                        {lastSaved ? `Saved offline ${lastSaved.toLocaleTimeString()}` : 'Saved offline'}
+                      </Text>
+                    </>
+                  )}
+                  {autoSaveStatus === 'error' && (
+                    <>
+                      <MaterialIcons name="error" size={16} color="#ef4444" />
+                      <Text style={styles.autoSaveText}>Offline save failed</Text>
+                    </>
+                  )}
+                </View>
+              )}
+            </View>
+          )}<Text style={styles.title}>
             {schema.title}
           </Text>
           {schema.description && (
@@ -1225,56 +1620,27 @@ export default function FormScreen() {
               </Pressable>
               {showDescription && (
                 <Text style={styles.description}>{schema.description}</Text>
-              )}
-            </View>
+              )}            </View>
           )}
-          {isEditing && !isViewMode && (
-            <View style={styles.editingNotice}>
-              <Text style={styles.editingText}>
-                You are editing an existing audit. Make changes and resubmit.
-              </Text>
-            </View>
-          )}          <View style={styles.formInfo}>
-            <Text style={styles.formInfoText}>
+          <View style={styles.formInfo}>
+            <Text style={styles.description}>
               {schema.fields.filter(f => f.type !== 'section' && !f.isSection).length + 2} questions • Required fields are marked with *
             </Text>
-            
-            {/* Auto-save status indicator */}
-            <View style={styles.autoSaveContainer}>
-              {!isConnected && (
-                <View style={styles.offlineIndicator}>
-                  <MaterialIcons name="wifi-off" size={16} color="#ef4444" />
-                  <Text style={styles.offlineText}>Offline</Text>
-                </View>
-              )}
-              
-              {autoSaving && (
-                <View style={styles.autoSaveIndicator}>
-                  <ActivityIndicator size="small" color="#10b981" />
-                  <Text style={styles.autoSaveText}>Auto-saving...</Text>
-                </View>
-              )}
-              
-              {lastAutoSave && !autoSaving && (
-                <View style={styles.autoSaveIndicator}>
-                  <MaterialIcons name="cloud-done" size={16} color="#10b981" />
-                  <Text style={styles.autoSaveText}>
-                    Saved {lastAutoSave.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </Text>
-                </View>
-              )}
-            </View>
           </View>
         </View>
-      </View>
-
-      <ScrollView
+      </View>      <ScrollView
+        ref={scrollViewRef}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-      >
-        {/* Audit Title Field */}
-        <View style={styles.fieldCard}>
+        keyboardShouldPersistTaps="always"
+        keyboardDismissMode="on-drag"
+        nestedScrollEnabled={true}
+      >{/* Audit Title Field */}
+        <View 
+          style={styles.fieldCard}
+          onLayout={(event) => handleFieldLayout('auditTitle', event)}
+        >
           <View style={styles.fieldHeader}>
             <Text style={styles.fieldNumber}>1.</Text>
             <View style={styles.fieldTitleContainer}>
@@ -1297,9 +1663,13 @@ export default function FormScreen() {
                 if (errors['auditTitle']) {
                   setErrors(prev => ({ ...prev, auditTitle: '' }));
                 }
-                // Trigger debounced auto-save when title changes
-                if (text.trim() && user?.id) {
-                  debouncedAutoSave();
+                // No auto-save during normal editing
+              }}
+              onFocus={() => {
+                if (!isViewMode) {
+                  setTimeout(() => {
+                    scrollToField('auditTitle');
+                  }, 100);
                 }
               }}
               editable={!isViewMode}
@@ -1323,10 +1693,12 @@ export default function FormScreen() {
           }
 
           // Calculate sequential question number (excluding sections)
-          const questionNumber = schema.fields.slice(0, index + 1).filter(f => f.type !== 'section' && !f.isSection).length + 1;
-
-          return (
-            <View key={field.id} style={styles.fieldCard}>
+          const questionNumber = schema.fields.slice(0, index + 1).filter(f => f.type !== 'section' && !f.isSection).length + 1;          return (
+            <View 
+              key={field.id} 
+              style={styles.fieldCard}
+              onLayout={(event) => handleFieldLayout(field.id, event)}
+            >
               <View style={styles.fieldHeader}>
                 <Text style={styles.fieldNumber}>{questionNumber}.</Text>
                 <View style={styles.fieldTitleContainer}>
@@ -1348,7 +1720,10 @@ export default function FormScreen() {
             </View>
           );
         })}        {/* Comments Field */}
-        <View style={styles.fieldCard}>
+        <View 
+          style={styles.fieldCard}
+          onLayout={(event) => handleFieldLayout('comments', event)}
+        >
           <View style={styles.fieldHeader}>
             <Text style={styles.fieldNumber}>{schema.fields.filter(f => f.type !== 'section' && !f.isSection).length + 2}.</Text>
             <View style={styles.fieldTitleContainer}>
@@ -1361,8 +1736,7 @@ export default function FormScreen() {
               </Text>
             </View>
           </View>
-          <View style={styles.fieldInputContainer}>
-            <TextInput
+          <View style={styles.fieldInputContainer}>            <TextInput
               style={[
                 styles.input,
                 styles.commentsInput,
@@ -1370,67 +1744,70 @@ export default function FormScreen() {
               ]}
               placeholder="Add any additional comments or observations..."
               value={userComments}
-              onChangeText={(text) => {
-                setUserComments(text);
-                // Trigger debounced auto-save when comments change
-                if (auditTitle.trim() && user?.id) {
-                  debouncedAutoSave();
+              onChangeText={setUserComments}
+              onFocus={() => {
+                if (!isViewMode) {
+                  setTimeout(() => {
+                    scrollToField('comments');
+                  }, 100);
                 }
               }}
               multiline={true}
               numberOfLines={4}
               textAlignVertical="top"
               editable={!isViewMode}
-            />
+            />          </View>
+        </View>        {/* Save/Submit Buttons - Now inside ScrollView at bottom of form content */}
+        {!isViewMode && (
+          <View style={styles.submitContainer}>
+            <Pressable
+              style={[styles.draftButton, savingDraft && styles.draftButtonDisabled]}
+              onPress={saveDraft}
+              disabled={savingDraft || submitting}
+            >
+              <MaterialIcons name="save" size={20} color="#6b7280" />
+              <Text style={styles.draftButtonText}>
+                {savingDraft ? 'Saving...' : !isOnline ? 'Save Offline' : 'Save as Draft'}
+              </Text>
+            </Pressable>
+            
+            <Pressable
+              style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
+              onPress={handleSubmit}
+              disabled={submitting || savingDraft}
+            >
+              <Text style={styles.submitButtonText}>
+                {submitting 
+                  ? (isEditing ? 'Updating...' : 'Submitting...') 
+                  : !isOnline 
+                    ? (isEditing ? 'Update Offline' : 'Submit Offline')
+                    : (isEditing ? 'Update Audit' : 'Submit Form')
+                }
+              </Text>
+            </Pressable>
           </View>
-        </View>
-      </ScrollView>      {!isViewMode && (
-        <View style={styles.submitContainer}>          <Pressable
-            style={[styles.draftButton, (savingDraft || autoSaving) && styles.draftButtonDisabled]}
-            onPress={saveDraft}
-            disabled={savingDraft || submitting || autoSaving}
-          >
-            <MaterialIcons name="save" size={20} color="#6b7280" />
-            <Text style={styles.draftButtonText}>
-              {savingDraft ? 'Saving...' : autoSaving ? 'Auto-saving...' : 'Save as Draft'}
-            </Text>
-          </Pressable>
-          
-          <Pressable
-            style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
-            onPress={handleSubmit}
-            disabled={submitting || savingDraft}
-          >
-            <Text style={styles.submitButtonText}>
-              {submitting ? (isEditing ? 'Updating...' : 'Submitting...') : (isEditing ? 'Update Audit' : 'Submit Form')}
-            </Text>
-          </Pressable>
-        </View>
-      )}
-
-      {isViewMode && (
-        <Pressable
+        )}
+      </ScrollView>{isViewMode && (        <Pressable
           style={styles.floatingEditButton}
           onPress={() => {
             setIsViewMode(false);
-            Alert.alert(
-              'Edit Mode',
-              'You can now edit this audit. Make your changes and resubmit when ready.',
-              [{ text: 'OK' }]
-            );
+            // No Alert to prevent keyboard interference
+            // Edit mode is clearly indicated by the mode indicator
           }}
-        >
-          <MaterialIcons name="edit" size={24} color="#ffffff" />
+        ><MaterialIcons name="edit" size={24} color="#ffffff" />
         </Pressable>
       )}
+      </KeyboardAvoidingView>
     </Screen>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
+const styles = StyleSheet.create({  container: {
     flex: 1,
     backgroundColor: '#ffffff',
+  },
+  keyboardAvoidingView: {
+    flex: 1,
   },
   backButton: {
     marginTop: 16,
@@ -1457,11 +1834,6 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: '#f3f4f6',
-  },
-  formInfoText: {
-    fontSize: 14,
-    color: '#6b7280',
-    lineHeight: 20,
   },
   title: {
     fontSize: 24,
@@ -1507,9 +1879,8 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
     paddingHorizontal: 16,
-  },
-  scrollContent: {
-    paddingBottom: 100,
+  },  scrollContent: {
+    paddingBottom: 20, // Reduced padding since buttons are now inside ScrollView
   },
   fieldCard: {
     backgroundColor: '#ffffff',
@@ -1618,20 +1989,29 @@ const styles = StyleSheet.create({
   },
   booleanTextDisabled: {
     color: '#9ca3af',
-  },
-  pickerContainer: {
+  },  pickerContainer: {
     borderWidth: 1,
     borderColor: '#d1d5db',
     borderRadius: 8,
     backgroundColor: '#ffffff',
     overflow: 'hidden',
+    minHeight: 52, // Ensure minimum height to match input fields
+    justifyContent: 'center', // Center content vertically
+    paddingHorizontal: Platform.OS === 'ios' ? 8 : 0, // iOS needs padding
   },
   picker: {
-    height: 50,
-  },  submitContainer: {
-    paddingHorizontal: 16,
-    paddingBottom: 32,
-    paddingTop: 16,
+    height: Platform.OS === 'ios' ? 52 : 56, // Different heights for platforms
+    fontSize: 16, // Ensure readable font size
+    color: '#374151', // Set text color
+    backgroundColor: 'transparent',
+  },
+  pickerReadOnly: {
+    backgroundColor: '#f9fafb',
+    opacity: 0.8,
+  },submitContainer: {
+    paddingHorizontal: 0, // Remove horizontal padding since ScrollView already has it
+    paddingBottom: 20, // Bottom padding for form content
+    paddingTop: 24, // Top padding to separate from form fields
     flexDirection: 'row',
     gap: 12,
   },
@@ -2084,7 +2464,7 @@ const styles = StyleSheet.create({
     color: '#6b7280',
   },
   // Auto-save styles
-  autoSaveContainer: {
+  autoSaveIndicator: {
     marginTop: 8,
     flexDirection: 'row',
     alignItems: 'center',
@@ -2093,10 +2473,12 @@ const styles = StyleSheet.create({
   offlineIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fee2e2',
+    backgroundColor: '#fef2f2',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#fecaca',
   },
   offlineText: {
     fontSize: 12,
@@ -2104,17 +2486,47 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     fontWeight: '500',
   },
-  autoSaveIndicator: {
+  autoSaveStatus: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ecfdf5',
+    backgroundColor: '#f9fafb',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  autoSaveStatusSaving: {
+    backgroundColor: '#fef3c7',
+    borderColor: '#fde68a',
+  },
+  autoSaveStatusSaved: {
+    backgroundColor: '#ecfdf5',
+    borderColor: '#bbf7d0',
+  },
+  autoSaveStatusError: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
   },
   autoSaveText: {
     fontSize: 12,
-    color: '#10b981',
+    color: '#6b7280',
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+  pendingSubmissionIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fef3c7',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#fde68a',
+  },
+  pendingSubmissionText: {
+    fontSize: 12,
+    color: '#f59e0b',
     marginLeft: 4,
     fontWeight: '500',
   },

@@ -7,6 +7,7 @@ import Screen from '../../components/Screen'
 import SearchBar from '../../components/SearchBar'
 import StatusBadge from '../../components/StatusBadge'
 import { supabase } from '../../lib/supabase'
+import { useAuth } from '../../lib/useAuth'
 
 interface ComplianceRecord {
   id: number
@@ -16,6 +17,7 @@ interface ComplianceRecord {
 }
 
 const Audit = () => {
+  const { user, profile } = useAuth()
   const [compliances, setCompliances] = useState<ComplianceRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)

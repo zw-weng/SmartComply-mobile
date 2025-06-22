@@ -7,6 +7,11 @@ export interface UserProfile {
   user_id: string;
   role: UserRole;
   full_name: string; // NOT NULL in your schema
+  tenant_id: number;
+  tenant?: {
+    id: number;
+    name: string;
+  };
 }
 
 /**
@@ -44,7 +49,17 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
   try {
     const { data: profileData, error } = await supabase
       .from('profiles')
-      .select('id, user_id, role, full_name')
+      .select(`
+        id, 
+        user_id, 
+        role, 
+        full_name, 
+        tenant_id,
+        tenant:tenant_id (
+          id,
+          name
+        )
+      `)
       .eq('user_id', userId)
       .single();
 
@@ -58,7 +73,10 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
       return null;
     }
 
-    return profileData as UserProfile;
+    return {
+      ...profileData,
+      tenant: Array.isArray(profileData.tenant) ? profileData.tenant[0] : profileData.tenant
+    } as UserProfile;
   } catch (error) {
     console.error('Error getting user profile:', error);
     return null;
@@ -69,12 +87,17 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
  * Create a new user profile with 'user' role
  * @param userId - The user ID to create profile for
  * @param fullName - The user's full name (required)
+ * @param tenantId - The tenant ID to associate with the user (required)
  * @returns Promise<{ success: boolean; error?: string }> - Whether the profile was created successfully
  */
-export async function createUserProfile(userId: string, fullName: string): Promise<{ success: boolean; error?: string }> {
+export async function createUserProfile(userId: string, fullName: string, tenantId: number): Promise<{ success: boolean; error?: string }> {
   try {
     if (!fullName?.trim()) {
       return { success: false, error: 'Full name is required' };
+    }
+
+    if (!tenantId) {
+      return { success: false, error: 'Tenant ID is required' };
     }
 
     const { error } = await supabase
@@ -82,7 +105,8 @@ export async function createUserProfile(userId: string, fullName: string): Promi
       .insert({
         user_id: userId,
         role: 'user' as UserRole,
-        full_name: fullName.trim()
+        full_name: fullName.trim(),
+        tenant_id: tenantId
       });
 
     if (error) {

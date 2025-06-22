@@ -1,7 +1,7 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Button from '../../components/Button';
 import Card from '../../components/Card';
 import DashboardHeader from '../../components/DashboardHeader';
@@ -12,7 +12,7 @@ import { createUserProfile, getUserProfile, updateUserProfile, UserProfile } fro
 import { useAuth } from '../../lib/useAuth';
 
 export default function ProfileScreen() {
-  const { user, signOut } = useAuth();
+  const { user, profile: authProfile, signOut } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -41,12 +41,19 @@ export default function ProfileScreen() {
   const hideToast = () => {
     setToast(prev => ({ ...prev, visible: false }));
   };
-
   const loadProfile = async () => {
     if (!user) return;
 
     try {
       setLoading(true);
+      
+      // If we already have profile from auth, use it as fallback
+      if (authProfile) {
+        setProfile(authProfile);
+        setFullName(authProfile.full_name || '');
+        setEmail(user?.email || '');
+      }
+
       const timeout = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Profile loading timeout')), 10000)
       );
@@ -58,16 +65,21 @@ export default function ProfileScreen() {
         setProfile(userProfile);
         setFullName(userProfile.full_name || '');
         setEmail(user?.email || '');
-      } else {
+      } else if (!authProfile) {
+        // Only set empty if we don't have authProfile fallback
         setProfile(null);
         setFullName('');
         setEmail(user?.email || '');
       }
     } catch (error) {
       console.error('Error loading profile:', error);
-      setProfile(null);
-      setFullName('');
-      setEmail(user?.email || '');
+      
+      // If we don't have authProfile fallback, clear everything
+      if (!authProfile) {
+        setProfile(null);
+        setFullName('');
+        setEmail(user?.email || '');
+      }
 
       if (error instanceof Error && error.message === 'Profile loading timeout') {
         showAlert('Error', 'Profile loading is taking too long. Please check your connection and try again.');
@@ -88,10 +100,15 @@ export default function ProfileScreen() {
     }
 
     try {
-      setSaving(true);
+      setSaving(true);      if (!profile) {
+        // Check if we have tenant info from auth profile
+        if (!authProfile?.tenant_id) {
+          showToast('Tenant information not found. Please contact support.', 'error');
+          setSaving(false);
+          return;
+        }
 
-      if (!profile) {
-        const createResult = await createUserProfile(user.id, fullName.trim());
+        const createResult = await createUserProfile(user.id, fullName.trim(), authProfile.tenant_id);
 
         if (!createResult.success) {
           showToast(createResult.error || 'Failed to create profile', 'error');
@@ -153,12 +170,11 @@ export default function ProfileScreen() {
       .substring(0, 2)
       .toUpperCase();
   };
-
   useEffect(() => {
     if (user) {
       loadProfile();
     }
-  }, [user?.id]);
+  }, [user?.id, authProfile?.id]);
 
   if (loading) {
     return (
@@ -197,21 +213,29 @@ export default function ProfileScreen() {
                   {getInitials(fullName)}
                 </Text>
               </View>
-            </View>
-            <View style={styles.profileInfo}>
+            </View>            <View style={styles.profileInfo}>
               <Text style={styles.profileName}>
                 {fullName || 'User'}
               </Text>
               <Text style={styles.profileEmail}>
                 {email || 'No email'}
               </Text>
-              {profile?.role ? (
-                <View style={styles.roleBadge}>
-                  <Text style={styles.roleText}>
-                    {profile.role.toUpperCase()}
-                  </Text>
-                </View>
-              ) : null}
+              <View style={styles.badgeContainer}>
+                {(profile?.role || authProfile?.role) && (
+                  <View style={styles.roleBadge}>
+                    <Text style={styles.roleText}>
+                      {(profile?.role || authProfile?.role)?.toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+                {(profile?.tenant?.name || authProfile?.tenant?.name) && (
+                  <View style={styles.tenantBadge}>
+                    <Text style={styles.tenantText}>
+                      {profile?.tenant?.name || authProfile?.tenant?.name}
+                    </Text>
+                  </View>
+                )}
+              </View>
             </View>
           </View>
         </Card>
@@ -260,9 +284,7 @@ export default function ProfileScreen() {
                 size="small"
                 onPress={() => setIsEditing(true)}
               />
-            </View>
-
-            <ListItem
+            </View>            <ListItem
               title="Full Name"
               subtitle={fullName || 'Not set'}
               leftIcon="person"
@@ -273,7 +295,20 @@ export default function ProfileScreen() {
               subtitle={email || 'Not set'}
               leftIcon="email"
               showChevron={false}
+            />            <ListItem
+              title="Organization"
+              subtitle={profile?.tenant?.name || authProfile?.tenant?.name || 'Not assigned'}
+              leftIcon="business"
+              showChevron={false}
             />
+            {(profile?.role || authProfile?.role) && (
+              <ListItem
+                title="Role"
+                subtitle={(profile?.role || authProfile?.role)?.toUpperCase()}
+                leftIcon="badge"
+                showChevron={false}
+              />
+            )}
           </Card>
         )}
 
@@ -346,8 +381,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#6b7280',
     marginBottom: 8,
-  },
-  roleBadge: {
+  },  roleBadge: {
     backgroundColor: '#dbeafe',
     paddingHorizontal: 12,
     paddingVertical: 4,
@@ -358,6 +392,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#1d4ed8',
+  },
+  badgeContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  tenantBadge: {
+    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 16,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+  },
+  tenantText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#374151',
   },
   editCard: {
     marginBottom: 16,
