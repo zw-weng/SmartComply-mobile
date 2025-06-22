@@ -41,6 +41,7 @@ export default function ProfileScreen() {
   const hideToast = () => {
     setToast(prev => ({ ...prev, visible: false }));
   };
+
   const loadProfile = async () => {
     if (!user) return;
 
@@ -100,7 +101,9 @@ export default function ProfileScreen() {
     }
 
     try {
-      setSaving(true);      if (!profile) {
+      setSaving(true);
+      
+      if (!profile) {
         // Check if we have tenant info from auth profile
         if (!authProfile?.tenant_id) {
           showToast('Tenant information not found. Please contact support.', 'error');
@@ -170,6 +173,7 @@ export default function ProfileScreen() {
       .substring(0, 2)
       .toUpperCase();
   };
+
   useEffect(() => {
     if (user) {
       loadProfile();
@@ -213,7 +217,8 @@ export default function ProfileScreen() {
                   {getInitials(fullName)}
                 </Text>
               </View>
-            </View>            <View style={styles.profileInfo}>
+            </View>
+            <View style={styles.profileInfo}>
               <Text style={styles.profileName}>
                 {fullName || 'User'}
               </Text>
@@ -284,7 +289,8 @@ export default function ProfileScreen() {
                 size="small"
                 onPress={() => setIsEditing(true)}
               />
-            </View>            <ListItem
+            </View>
+            <ListItem
               title="Full Name"
               subtitle={fullName || 'Not set'}
               leftIcon="person"
@@ -295,7 +301,8 @@ export default function ProfileScreen() {
               subtitle={email || 'Not set'}
               leftIcon="email"
               showChevron={false}
-            />            <ListItem
+            />
+            <ListItem
               title="Organization"
               subtitle={profile?.tenant?.name || authProfile?.tenant?.name || 'Not assigned'}
               leftIcon="business"
@@ -381,7 +388,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#6b7280',
     marginBottom: 8,
-  },  roleBadge: {
+  },
+  badgeContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  roleBadge: {
     backgroundColor: '#dbeafe',
     paddingHorizontal: 12,
     paddingVertical: 4,
@@ -392,11 +405,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#1d4ed8',
-  },
-  badgeContainer: {
-    flexDirection: 'row',
-    gap: 8,
-    flexWrap: 'wrap',
   },
   tenantBadge: {
     backgroundColor: '#f3f4f6',

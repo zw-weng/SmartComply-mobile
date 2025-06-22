@@ -21,12 +21,12 @@ import { useAuth } from '../../lib/useAuth';
 interface AuditRecord {
   id: number;
   form_id: number;
-  title: string | null; // Allow null for safety
+  title: string | null;
   status: string;
-  result: string;
-  marks: number;
-  percentage: number;
-  comments: string | null; // Allow null for safety
+  result: string | null;
+  marks: number | null;
+  percentage: number | null;
+  comments: string | null;
   created_at: string;
   last_edit_at?: string;
   form?: {
@@ -50,28 +50,17 @@ export default function HistoryScreen() {
   const [selectedAudit, setSelectedAudit] = useState<AuditRecord | null>(null);
   const [showOptionsModal, setShowOptionsModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'completed' | 'draft'>('all');  const fetchAudits = async () => {
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'completed' | 'draft'>('all');
+
+  const fetchAudits = async () => {
     if (!user?.id || !profile?.tenant_id) {
       console.warn('No user ID or tenant ID found');
-      console.warn('User ID:', user?.id);
-      console.warn('Profile:', profile);
-      console.warn('Tenant ID:', profile?.tenant_id);
       setLoading(false);
       setRefreshing(false);
       return;
     }
 
-    console.log('Fetching audits for user:', user.id, 'tenant:', profile.tenant_id);    try {
-      // First, let's check if there are any audits for this user without tenant filter (for debugging)
-      const { data: debugAudits, error: debugError } = await supabase
-        .from('audit')
-        .select('id, user_id, tenant_id, title, status')
-        .eq('user_id', user.id);
-      
-      console.log('Debug - All audits for user (no tenant filter):', debugAudits);
-      console.log('Debug - Error:', debugError);
-
-      // Fetch audits with form information, filtered by user and tenant
+    try {
       const { data: auditsData, error: auditsError } = await supabase
         .from('audit')
         .select(`
@@ -82,15 +71,12 @@ export default function HistoryScreen() {
         `)
         .eq('user_id', user.id)
         .eq('tenant_id', profile.tenant_id)
-        .order('created_at', { ascending: false });      if (auditsError) throw auditsError;
+        .order('created_at', { ascending: false });
 
-      console.log('Audits data with tenant filter:', auditsData);
+      if (auditsError) throw auditsError;
 
-      // If no audits found with tenant filter, try without tenant filter as fallback
-      // This handles the case where existing audits don't have tenant_id yet
       let finalAuditsData = auditsData;
       if (!auditsData || auditsData.length === 0) {
-        console.log('No audits found with tenant filter, trying without tenant filter...');
         const { data: fallbackAudits, error: fallbackError } = await supabase
           .from('audit')
           .select(`
@@ -101,33 +87,25 @@ export default function HistoryScreen() {
           `)
           .eq('user_id', user.id)
           .order('created_at', { ascending: false });
-        
+
         if (!fallbackError && fallbackAudits) {
-          console.log('Found audits without tenant filter:', fallbackAudits);
           finalAuditsData = fallbackAudits;
         }
       }
-
-      console.log('Final audits data:', finalAuditsData);
 
       if (!finalAuditsData || finalAuditsData.length === 0) {
         setAudits([]);
         setLoading(false);
         setRefreshing(false);
         return;
-      }      // Get unique user IDs from audits to fetch profiles
-      const userIds = [...new Set(finalAuditsData.map((audit) => audit.user_id))];
-      console.log('Fetching profiles for user IDs:', userIds);
+      }
 
-      // Fetch profiles for all users who have audits
+      const userIds = [...new Set(finalAuditsData.map((audit) => audit.user_id))];
       const { data: profilesData, error: profilesError } = await supabase
         .from('profiles')
         .select('user_id, full_name')
         .in('user_id', userIds);
 
-      console.log('Profiles query result:', { profilesData, profilesError });
-
-      // Fallback user name if profiles fetch fails
       let fallbackUserName = 'Unknown User';
       if (profilesError && user) {
         fallbackUserName =
@@ -135,39 +113,28 @@ export default function HistoryScreen() {
           user.user_metadata?.name ||
           user.email?.split('@')[0] ||
           'Current User';
-        console.log('Using fallback user name:', fallbackUserName);
       }
 
-      if (profilesError) {
-        console.warn('Warning: Could not fetch profiles:', profilesError);
-      }      // Validate and merge audit data with profile data
       const auditsWithProfiles = finalAuditsData.map((audit) => {
-        // Ensure critical fields are strings
         const validatedAudit = {
           ...audit,
           title: audit.title ?? 'Untitled Audit',
-          status: audit.status ?? 'Unknown',
-          result: audit.result ?? 'Unknown',
+          status: audit.status ?? 'draft',
+          result: audit.result ?? 'draft',
+          marks: audit.marks ?? null,
+          percentage: audit.percentage ?? null,
           comments: audit.comments ?? null,
           form: audit.form ?? { form_schema: { title: 'Unknown Form' } },
         };
 
-        if (!audit.result || typeof audit.result !== 'string') {
-          console.warn('Invalid audit result:', audit.result);
-        }
-        if (!audit.status || typeof audit.status !== 'string') {
-          console.warn('Invalid audit status:', audit.status);
-        }
-
         return {
           ...validatedAudit,
           profiles: profilesData?.find((profile) => profile.user_id === audit.user_id) || {
-            full_name: profilesError ? fallbackUserName : 'Unknown User',
+            full_name: fallbackUserName,
           },
         };
       });
 
-      console.log('Final merged audits:', auditsWithProfiles.length, 'audits');
       setAudits(auditsWithProfiles);
     } catch (error) {
       console.error('Error fetching audits:', error);
@@ -177,6 +144,7 @@ export default function HistoryScreen() {
       setRefreshing(false);
     }
   };
+
   useEffect(() => {
     if (user?.id && profile?.tenant_id) {
       fetchAudits();
@@ -187,7 +155,9 @@ export default function HistoryScreen() {
     setRefreshing(true);
     fetchAudits();
   }, []);
-  const getResultColor = (result: string) => {
+
+  const getResultColor = (result: string | null) => {
+    if (!result) return '#8b5cf6'; // Default to draft color if null
     switch (result.toLowerCase()) {
       case 'pass':
       case 'passed':
@@ -202,7 +172,8 @@ export default function HistoryScreen() {
     }
   };
 
-  const getResultBackgroundColor = (result: string) => {
+  const getResultBackgroundColor = (result: string | null) => {
+    if (!result) return '#ede9fe'; // Default to draft background if null
     switch (result.toLowerCase()) {
       case 'pass':
       case 'passed':
@@ -216,7 +187,9 @@ export default function HistoryScreen() {
         return '#f3f4f6';
     }
   };
-  const getResultIcon = (result: string) => {
+
+  const getResultIcon = (result: string | null) => {
+    if (!result) return 'edit'; // Default to draft icon if null
     switch (result.toLowerCase()) {
       case 'pass':
       case 'passed':
@@ -230,6 +203,7 @@ export default function HistoryScreen() {
         return 'help';
     }
   };
+
   const getStatusColor = (status: string) => {
     const normalizedStatus = status.toLowerCase();
     if (normalizedStatus.includes('completed') || normalizedStatus.includes('done')) {
@@ -260,12 +234,6 @@ export default function HistoryScreen() {
       return '#fee2e2';
     }
     return '#f3f4f6';
-  };
-
-  const getScoreGradient = (percentage: number) => {
-    if (percentage >= 80) return ['#10b981', '#059669']; // Green
-    if (percentage >= 60) return ['#f59e0b', '#d97706']; // Orange
-    return ['#ef4444', '#dc2626']; // Red
   };
 
   const formatDate = (dateString: string) => {
@@ -319,14 +287,13 @@ export default function HistoryScreen() {
   };
 
   const handleAuditPress = (audit: AuditRecord) => {
-    console.log('Selected audit:', audit); // Log selected audit
     setSelectedAudit(audit);
     setShowOptionsModal(true);
   };
+
   const handleViewDetails = () => {
     if (selectedAudit) {
       setShowOptionsModal(false);
-      // If it's a draft, open in edit mode by default
       const mode = selectedAudit.status === 'draft' ? 'edit' : 'view';
       router.push(`/audit/form/${selectedAudit.form_id}?auditId=${selectedAudit.id}&mode=${mode}`);
     }
@@ -344,38 +311,43 @@ export default function HistoryScreen() {
     setSelectedAudit(null);
   };
 
-  const showAuditDetails = (audit: AuditRecord) => {
-    const lastActivityDate = getLastActivityDate(audit);
-    const timeInfo = audit.last_edit_at
-      ? `\nLast Edit: ${formatFullDate(lastActivityDate)}\nOriginal Creation: ${formatFullDate(audit.created_at)}`
-      : `\nCreated: ${formatFullDate(audit.created_at)}`;    Alert.alert(
-      'Audit Details',
-      `Title: ${audit.title || 'Untitled Audit'}\nForm: ${audit.form?.form_schema?.title || 'Unknown Form'}\nAuditor: ${
-        audit.profiles?.full_name || 'Unknown User'
-      }${audit.result ? `\nResult: ${audit.result.toUpperCase()}` : ''}${audit.marks !== null && audit.percentage !== null ? `\nScore: ${audit.marks} (${audit.percentage.toFixed(1)}%)` : '\nScore: Draft (not calculated)'}\nStatus: ${
-        audit.status.toUpperCase()
-      }${timeInfo}${audit.comments ? `\nComments: ${audit.comments}` : ''}`,
-      [{ text: 'Close', style: 'cancel' }],
-    );
-  };
-  const renderAuditItem = ({ item }: { item: AuditRecord }) => {
-    console.log('Rendering audit item:', item); // Log to inspect item
-    const editStatus = getEditStatus(item);
-    const resultColor = getResultColor(item.result || 'draft');
-    const resultBgColor = getResultBackgroundColor(item.result || 'draft');
-    const auditRef = generateAuditReference(item.id);
+  const getFilteredAudits = () => {
+    let filtered = audits;
 
-    // Type checks for safety
-    if (item.result !== null && typeof item.result !== 'string') {
-      console.warn('item.result is not a string:', item.result);
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter((audit) => {
+        const auditTitle = audit.title?.toLowerCase() ?? '';
+        const formTitle = audit.form?.form_schema?.title?.toLowerCase() ?? '';
+        return auditTitle.includes(query) || formTitle.includes(query);
+      });
     }
-    if (typeof item.status !== 'string') {
-      console.warn('item.status is not a string:', item.status);
+
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter((audit) => {
+        const status = audit.status.toLowerCase();
+        if (statusFilter === 'pending') {
+          return status.includes('pending') || status.includes('in_progress');
+        } else if (statusFilter === 'completed') {
+          return status.includes('completed') || status.includes('done');
+        } else if (statusFilter === 'draft') {
+          return status.includes('draft');
+        }
+        return true;
+      });
     }
+
+    return filtered;
+  };
+
+  const renderAuditItem = ({ item }: { item: AuditRecord }) => {
+    const editStatus = getEditStatus(item);
+    const resultColor = getResultColor(item.result);
+    const resultBgColor = getResultBackgroundColor(item.result);
+    const auditRef = generateAuditReference(item.id);
 
     return (
       <Pressable style={styles.auditCard} onPress={() => handleAuditPress(item)}>
-        {/* Audit Reference Header */}
         <View style={styles.auditRefHeader}>
           <View style={styles.refLeftSection}>
             <Text style={styles.auditRefNumber}>{auditRef}</Text>
@@ -383,7 +355,11 @@ export default function HistoryScreen() {
 
           <View style={styles.badgesContainer}>
             <View style={[styles.resultBadge, { backgroundColor: resultBgColor }]}>
-              <MaterialIcons name={getResultIcon(item.result || 'draft') as any} size={18} color={resultColor} />
+              <MaterialIcons
+                name={getResultIcon(item.result) as any}
+                size={18}
+                color={resultColor}
+              />
               <Text style={[styles.resultText, { color: resultColor }]}>
                 {item.result ? item.result.toUpperCase() : 'DRAFT'}
               </Text>
@@ -396,7 +372,6 @@ export default function HistoryScreen() {
           </View>
         </View>
 
-        {/* Audit Information */}
         <View style={styles.cardHeader}>
           <View style={styles.formInfo}>
             <Text style={styles.formTitle} numberOfLines={2}>
@@ -406,13 +381,14 @@ export default function HistoryScreen() {
               Form: {item.form?.form_schema?.title ?? 'Unknown Form'}
             </Text>
           </View>
-        </View>        {/* Score section with visual progress */}
+        </View>
+
         <View style={styles.scoreSection}>
           <View style={styles.scoreDetails}>
             <Text style={styles.scoreCardLabel}>Score</Text>
             <Text style={styles.scoreValue}>
-              {item.percentage !== null && item.marks !== null 
-                ? `${item.marks} (${item.percentage.toFixed(1)}%)` 
+              {item.marks !== null && item.percentage !== null
+                ? `${item.marks} (${item.percentage.toFixed(1)}%)`
                 : 'Draft'}
             </Text>
           </View>
@@ -420,9 +396,9 @@ export default function HistoryScreen() {
           <View style={styles.progressContainer}>
             <View style={styles.progressBar}>
               <View
-                style={[styles.progressFill, { 
-                  width: item.percentage !== null ? `${Math.min(item.percentage, 100)}%` : '0%', 
-                  backgroundColor: resultColor 
+                style={[styles.progressFill, {
+                  width: item.percentage !== null ? `${Math.min(item.percentage, 100)}%` : '0%',
+                  backgroundColor: resultColor
                 }]}
               />
             </View>
@@ -432,16 +408,13 @@ export default function HistoryScreen() {
           </View>
         </View>
 
-        {/* Enhanced Footer with more details */}
         <View style={styles.cardFooter}>
           <View style={styles.footerContent}>
-            {/* Auditor Information */}
             <View style={styles.auditorSection}>
               <MaterialIcons name="person" size={16} color="#3b82f6" />
               <Text style={styles.auditorText}>{item.profiles?.full_name ?? 'Unknown User'}</Text>
             </View>
 
-            {/* Enhanced Timestamp */}
             <View style={styles.timestampSection}>
               <MaterialIcons name="schedule" size={14} color="#9ca3af" />
               <View style={styles.timestampDetails}>
@@ -450,7 +423,6 @@ export default function HistoryScreen() {
               </View>
             </View>
 
-            {/* Creation Information - show only if audit was edited */}
             {editStatus.isEdited && (
               <View style={styles.editSection}>
                 <MaterialIcons name="add" size={14} color="#6b7280" />
@@ -465,38 +437,6 @@ export default function HistoryScreen() {
         </View>
       </Pressable>
     );
-  };
-
-  // Filter audits based on search query and status filter
-  const getFilteredAudits = () => {
-    let filtered = audits;
-
-    // Apply search filter
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter((audit) => {
-        const auditTitle = audit.title?.toLowerCase() ?? '';
-        const formTitle = audit.form?.form_schema?.title?.toLowerCase() ?? '';
-        return auditTitle.includes(query) || formTitle.includes(query);
-      });
-    }
-
-    // Apply status filter
-    if (statusFilter !== 'all') {      filtered = filtered.filter((audit) => {
-        const status = audit.status.toLowerCase();
-        if (statusFilter === 'pending') {
-          return status.includes('pending') || status.includes('in_progress');
-        } else if (statusFilter === 'completed') {
-          return status.includes('completed') || status.includes('done');
-        } else if (statusFilter === 'draft') {
-          return status.includes('draft');
-        }
-        return true;
-      });
-    }
-
-    console.log('Filtered audits:', filtered); // Log to inspect filtered data
-    return filtered;
   };
 
   if (loading) {
@@ -521,7 +461,6 @@ export default function HistoryScreen() {
           {getFilteredAudits().length} of {audits.length} audit{audits.length !== 1 ? 's' : ''}
         </Text>
 
-        {/* Search and Filter Section */}
         <View style={styles.searchContainer}>
           <View style={styles.searchInputContainer}>
             <MaterialIcons name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
@@ -545,20 +484,19 @@ export default function HistoryScreen() {
               onPress={() => setStatusFilter('all')}
             >
               <Text style={[styles.filterText, statusFilter === 'all' && styles.filterTextActive]}>All</Text>
-            </Pressable>            <Pressable
+            </Pressable>
+            <Pressable
               style={[styles.filterButton, statusFilter === 'pending' && styles.filterButtonActive]}
               onPress={() => setStatusFilter('pending')}
             >
               <Text style={[styles.filterText, statusFilter === 'pending' && styles.filterTextActive]}>Pending</Text>
             </Pressable>
-
             <Pressable
               style={[styles.filterButton, statusFilter === 'completed' && styles.filterButtonActive]}
               onPress={() => setStatusFilter('completed')}
             >
               <Text style={[styles.filterText, statusFilter === 'completed' && styles.filterTextActive]}>Completed</Text>
             </Pressable>
-
             <Pressable
               style={[styles.filterButton, statusFilter === 'draft' && styles.filterButtonActive]}
               onPress={() => setStatusFilter('draft')}
@@ -604,13 +542,11 @@ export default function HistoryScreen() {
         />
       )}
 
-      {/* Custom Options Modal */}
       <Modal animationType="fade" transparent={true} visible={showOptionsModal} onRequestClose={handleCloseModal}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             {selectedAudit && (
               <>
-                {/* Modal Header */}
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>{generateAuditReference(selectedAudit.id)}</Text>
                   <Pressable onPress={handleCloseModal} style={styles.closeButton}>
@@ -618,9 +554,7 @@ export default function HistoryScreen() {
                   </Pressable>
                 </View>
 
-                {/* Main Content */}
                 <View style={styles.modalContent}>
-                  {/* Title and Status Row */}
                   <View style={styles.titleStatusRow}>
                     <View style={styles.titleContainer}>
                       <Text style={styles.auditTitle} numberOfLines={2}>
@@ -629,22 +563,21 @@ export default function HistoryScreen() {
                       <Text style={styles.formName}>
                         {selectedAudit.form?.form_schema?.title ?? 'Unknown Form'}
                       </Text>
-                    </View>                    <View style={styles.statusGroup}>
-                      {/* Result Badge */}
+                    </View>
+                    <View style={styles.statusGroup}>
                       <View
-                        style={[styles.statusChip, { backgroundColor: getResultBackgroundColor(selectedAudit.result || 'draft') }]}
+                        style={[styles.statusChip, { backgroundColor: getResultBackgroundColor(selectedAudit.result) }]}
                       >
                         <MaterialIcons
-                          name={getResultIcon(selectedAudit.result || 'draft') as any}
+                          name={getResultIcon(selectedAudit.result) as any}
                           size={16}
-                          color={getResultColor(selectedAudit.result || 'draft')}
+                          color={getResultColor(selectedAudit.result)}
                         />
-                        <Text style={[styles.statusText, { color: getResultColor(selectedAudit.result || 'draft') }]}>
+                        <Text style={[styles.statusText, { color: getResultColor(selectedAudit.result) }]}>
                           {selectedAudit.result ? selectedAudit.result.toUpperCase() : 'DRAFT'}
                         </Text>
                       </View>
 
-                      {/* Status Badge */}
                       <View
                         style={[styles.statusChip, { backgroundColor: getStatusBackgroundColor(selectedAudit.status) }]}
                       >
@@ -653,7 +586,8 @@ export default function HistoryScreen() {
                         </Text>
                       </View>
                     </View>
-                  </View>                  {/* Score Section */}
+                  </View>
+
                   <View style={styles.scoreCard}>
                     <View style={styles.scoreInfo}>
                       <Text style={styles.scoreNumber}>
@@ -666,7 +600,6 @@ export default function HistoryScreen() {
                     <Text style={styles.scoreLabel}>Score</Text>
                   </View>
 
-                  {/* Quick Details */}
                   <View style={styles.quickDetails}>
                     <View style={styles.detailItem}>
                       <MaterialIcons name="person" size={16} color="#6b7280" />
@@ -678,7 +611,6 @@ export default function HistoryScreen() {
                     </View>
                   </View>
 
-                  {/* Comments Section (Conditional) */}
                   {selectedAudit.comments && (
                     <View style={styles.commentsSection}>
                       <View style={styles.commentsHeader}>
@@ -688,7 +620,8 @@ export default function HistoryScreen() {
                       <Text style={styles.commentsText}>{selectedAudit.comments}</Text>
                     </View>
                   )}
-                </View>                {/* Action Buttons */}
+                </View>
+
                 <View style={styles.actionButtons}>
                   {selectedAudit.status === 'draft' ? (
                     <>
@@ -709,7 +642,6 @@ export default function HistoryScreen() {
                   )}
                 </View>
 
-                {/* Cancel Button */}
                 <Pressable style={styles.cancelButton} onPress={handleCloseModal}>
                   <Text style={styles.cancelButtonText}>Cancel</Text>
                 </Pressable>
@@ -1081,7 +1013,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#64748b',
     lineHeight: 20,
-  },  actionButtons: {
+  }, actionButtons: {
     paddingHorizontal: 24,
     paddingBottom: 24,
     flexDirection: 'row',
@@ -1095,7 +1027,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 12,
     gap: 8,
-  },  viewButton: {
+  }, viewButton: {
     backgroundColor: '#3b82f6',
   },
   editButton: {

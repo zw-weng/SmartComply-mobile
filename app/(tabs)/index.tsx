@@ -16,8 +16,7 @@ interface DashboardStats {
   completedAudits: number
   draftAudits: number
   failedAudits: number
-  averageScore: number
-  totalForms: number
+  passRate: number
 }
 
 interface RecentActivity {
@@ -38,8 +37,7 @@ export default function Index() {
     completedAudits: 0,
     draftAudits: 0,
     failedAudits: 0,
-    averageScore: 0,
-    totalForms: 0
+    passRate: 0
   })
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
   const [loading, setLoading] = useState(true)
@@ -123,14 +121,10 @@ export default function Index() {
       const draftAudits = audits.filter(audit => audit.status === 'draft').length
       const failedAudits = audits.filter(audit => audit.result === 'failed').length
       
-      // Calculate average score
-      const auditScores = audits.filter(audit => audit.percentage != null).map(audit => audit.percentage)
-      const averageScore = auditScores.length > 0 ? Math.round(auditScores.reduce((sum, score) => sum + score, 0) / auditScores.length) : 0
-
-      // Get total number of unique forms
-      const { count: totalForms } = await supabase
-        .from('form')
-        .select('*', { count: 'exact', head: true })
+      // Calculate pass rate
+      const auditsWithResults = audits.filter(audit => audit.result != null)
+      const passedAudits = audits.filter(audit => audit.result === 'pass').length
+      const passRate = auditsWithResults.length > 0 ? Math.round((passedAudits / auditsWithResults.length) * 100) : 0
 
       setStats({
         totalAudits,
@@ -138,8 +132,7 @@ export default function Index() {
         completedAudits,
         draftAudits,
         failedAudits,
-        averageScore,
-        totalForms: totalForms || 0
+        passRate
       })
 
       console.log('Calculated statistics:', {
@@ -148,8 +141,9 @@ export default function Index() {
         completedAudits,
         draftAudits,
         failedAudits,
-        averageScore,
-        totalForms: totalForms || 0
+        passRate,
+        auditsWithResults: auditsWithResults.length,
+        passedAudits
       })
 
       // Create recent activity from audits
@@ -205,8 +199,8 @@ export default function Index() {
       color: '#3b82f6'
     },
     {
-      title: 'Average Score',
-      value: `${stats.averageScore}%`,
+      title: 'Pass Rate',
+      value: `${stats.passRate}%`,
       icon: 'trending-up',
       color: '#8b5cf6'
     },
@@ -233,12 +227,6 @@ export default function Index() {
       value: stats.failedAudits,
       icon: 'error',
       color: '#ef4444'
-    },
-    {
-      title: 'Forms Available',
-      value: stats.totalForms,
-      icon: 'description',
-      color: '#06b6d4'
     }
   ]
 
