@@ -60,7 +60,8 @@ export default function FormScreen() {
     formId: string;
     auditId?: string;
     mode?: 'view' | 'edit';
-  }>();  const { user, profile } = useAuth();
+  }>();
+  const { user, profile } = useAuth();
   const [schema, setSchema] = useState<FormRecord['form_schema'] | null>(null);
   const [formThreshold, setFormThreshold] = useState<number>(60); // Default threshold
   const [values, setValues] = useState<Record<string, any>>({});
@@ -69,15 +70,20 @@ export default function FormScreen() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [isEditing, setIsEditing] = useState(false);  const [isViewMode, setIsViewMode] = useState(mode === 'view');
-  const [existingAuditId, setExistingAuditId] = useState<string | null>(null);  const [uploadingImages, setUploadingImages] = useState<Record<string, boolean>>({});  const [showDatePicker, setShowDatePicker] = useState<string | null>(null);  const [savingDraft, setSavingDraft] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isViewMode, setIsViewMode] = useState(mode === 'view');
+  const [existingAuditId, setExistingAuditId] = useState<string | null>(null);
+  const [uploadingImages, setUploadingImages] = useState<Record<string, boolean>>({});
+  const [showDatePicker, setShowDatePicker] = useState<string | null>(null);
+  const [savingDraft, setSavingDraft] = useState(false);
   const [showDescription, setShowDescription] = useState(false);
   const [hasOfflineSubmission, setHasOfflineSubmission] = useState(false);
   // Auto-save state
   const [isOnline, setIsOnline] = useState(true);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const [autoSaveTimeoutId, setAutoSaveTimeoutId] = useState<NodeJS.Timeout | number | null>(null);  // Refs for keyboard handling
+  const [autoSaveTimeoutId, setAutoSaveTimeoutId] = useState<NodeJS.Timeout | number | null>(null);
+  // Refs for keyboard handling
   const scrollViewRef = useRef<ScrollView>(null);
   const fieldPositions = useRef<Record<string, number>>({});
 
@@ -100,6 +106,7 @@ export default function FormScreen() {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
   };
+
   // Offline storage helpers
   const saveOfflineData = async (data: any, isDraft: boolean = true) => {
     try {
@@ -119,6 +126,7 @@ export default function FormScreen() {
       return false;
     }
   };
+
   const getOfflineData = async (isDraft: boolean = true) => {
     try {
       const keyType = isDraft ? 'draft' : 'submitted';
@@ -133,6 +141,7 @@ export default function FormScreen() {
       return null;
     }
   };
+
   const clearOfflineData = async (isDraft: boolean = true) => {
     try {
       const keyType = isDraft ? 'draft' : 'submitted';
@@ -143,10 +152,11 @@ export default function FormScreen() {
       console.error('Failed to clear offline data:', error);
     }
   };
+
   const syncOfflineData = async () => {
     try {
       let anyDataSynced = false;
-      
+
       // Sync draft data first
       const offlineDraft = await getOfflineData(true);
       if (offlineDraft && offlineDraft.isOffline) {
@@ -155,7 +165,7 @@ export default function FormScreen() {
         setValues(offlineDraft.audit_data || {});
         setAuditTitle(offlineDraft.title || '');
         setUserComments(offlineDraft.comments || '');
-        
+
         // Try to save draft to server
         const draftSuccess = await saveDraftSilently();
         if (draftSuccess) {
@@ -164,14 +174,14 @@ export default function FormScreen() {
           anyDataSynced = true;
         }
       }
-      
+
       // Sync submitted audit data
       const offlineSubmitted = await getOfflineData(false);
       if (offlineSubmitted && offlineSubmitted.isOffline) {
         console.log('Syncing offline submitted audit data...');
         try {
           let auditData, auditError;
-          
+
           if (offlineSubmitted.existingAuditId) {
             // Update existing audit
             const updateResult = await supabase
@@ -215,12 +225,13 @@ export default function FormScreen() {
             auditData = insertResult.data;
             auditError = insertResult.error;
           }
-            if (!auditError && auditData) {
+
+          if (!auditError && auditData) {
             await clearOfflineData(false);
             console.log('Offline submitted audit synced successfully');
             anyDataSynced = true;
             setHasOfflineSubmission(false); // Clear the indicator
-            
+
             // Show success message to user
             Alert.alert(
               'Sync Complete',
@@ -232,7 +243,7 @@ export default function FormScreen() {
           console.error('Failed to sync offline submitted audit:', error);
         }
       }
-      
+
       return anyDataSynced;
     } catch (error) {
       console.error('Failed to sync offline data:', error);
@@ -248,14 +259,14 @@ export default function FormScreen() {
 
       if (filesError) {
         if (filesError.message.includes('The resource was not found') ||
-            filesError.message.includes('Bucket not found')) {
+          filesError.message.includes('Bucket not found')) {
           Alert.alert(
             'Bucket Not Found',
             'The "audit-images" storage bucket does not exist.\n\nSteps to create:\n\n1. Open Supabase Dashboard\n2. Go to Storage → Buckets\n3. Click "New bucket"\n4. Name: audit-images\n5. Make it Public\n6. Create bucket\n\nThen try uploading again.'
           );
         } else if (filesError.message.includes('access') ||
-                   filesError.message.includes('permission') ||
-                   filesError.message.includes('policy')) {
+          filesError.message.includes('permission') ||
+          filesError.message.includes('policy')) {
           Alert.alert(
             'Bucket Access Denied',
             'Cannot access the "audit-images" bucket.\n\nThis might be due to:\n• Bucket is not public\n• Row Level Security (RLS) policies\n• Storage policies not configured\n\nTo fix:\n1. Go to Supabase Dashboard\n2. Storage → Buckets → audit-images\n3. Settings → Make sure "Public bucket" is enabled\n4. Try again'
@@ -297,7 +308,7 @@ export default function FormScreen() {
 
       const arrayBuffer = await response.arrayBuffer();
       const mimeType = fileExt === 'png' ? 'image/png' : 'image/jpeg';
-      
+
       const { data, error } = await supabase.storage
         .from('audit-images')
         .upload(filePath, arrayBuffer, {
@@ -340,11 +351,9 @@ export default function FormScreen() {
       if (status !== 'granted') {
         Alert.alert('Permission Required', 'Camera permission is required to take photos.');
         return;
-      }
-
-      setUploadingImages(prev => ({ ...prev, [fieldId]: true }));
+      }      setUploadingImages(prev => ({ ...prev, [fieldId]: true }));
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,
@@ -373,11 +382,9 @@ export default function FormScreen() {
       if (status !== 'granted') {
         Alert.alert('Permission Required', 'Photo library permission is required to select images.');
         return;
-      }
-
-      setUploadingImages(prev => ({ ...prev, [fieldId]: true }));
+      }      setUploadingImages(prev => ({ ...prev, [fieldId]: true }));
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,
@@ -401,7 +408,7 @@ export default function FormScreen() {
   };
 
   useEffect(() => {
-    if (!formId) return
+    if (!formId) return;
     if (!user?.id) {
       setLoading(false);
       return;
@@ -411,16 +418,17 @@ export default function FormScreen() {
 
     const fetchFormAndAudit = async () => {
       if (!isMounted) return;
-      
+
       setLoading(true);
-      try {        const { data: formData, error: formError } = await supabase
+      try {
+        const { data: formData, error: formError } = await supabase
           .from('form')
           .select('form_schema, threshold')
           .eq('id', formId)
           .single();
 
         if (!isMounted) return;
-        
+
         if (formError || !formData) {
           throw new Error('Failed to load form');
         }
@@ -476,17 +484,20 @@ export default function FormScreen() {
     };
 
     fetchFormAndAudit();
-    
+
     return () => {
       isMounted = false;
     };
-  }, [formId, auditId, user?.id]);  const handleChange = (fieldId: string, value: any) => {
+  }, [formId, auditId, user?.id]);
+
+  const handleChange = (fieldId: string, value: any) => {
     setValues(prev => ({ ...prev, [fieldId]: value }));
     if (errors[fieldId]) {
       setErrors(prev => ({ ...prev, [fieldId]: '' }));
     }
     // Auto-save is only triggered when going offline, not during normal editing
   };
+
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
     if (!auditTitle.trim()) {
@@ -497,7 +508,7 @@ export default function FormScreen() {
       if (field.required && (!values[field.id] || values[field.id] === '')) {
         newErrors[field.id] = `${field.label} is required`;
       }
-      
+
       // Email validation
       if (field.type === 'email' && values[field.id] && !validateEmail(values[field.id])) {
         newErrors[field.id] = 'Please enter a valid email address';
@@ -524,12 +535,14 @@ export default function FormScreen() {
       }
     }
     return { isFail: false };
-  };  const calculateScore = () => {
+  };
+
+  const calculateScore = () => {
     if (!schema) return { totalScore: 0, maxScore: 0, passPercentage: 0 };
 
     let totalScore = 0;
     let maxScore = 0;
-    
+
     schema.fields.forEach(field => {
       if (field.type === 'section' || field.isSection) return;
 
@@ -560,7 +573,7 @@ export default function FormScreen() {
           maxScore += maxFieldPoints * fieldWeight;
         } else {
           // No selection - max possible is still calculated for proper percentage
-          const maxFieldPoints = field.type === 'checkbox' 
+          const maxFieldPoints = field.type === 'checkbox'
             ? field.enhancedOptions.reduce((sum, opt) => sum + opt.points, 0)
             : Math.max(...field.enhancedOptions.map(opt => opt.points));
           maxScore += maxFieldPoints * fieldWeight;
@@ -581,7 +594,9 @@ export default function FormScreen() {
       case 'fail': return 'FAILED';
       default: return result.toUpperCase();
     }
-  };  const submitForm = async (isDraft: boolean = false) => {
+  };
+
+  const submitForm = async (isDraft: boolean = false) => {
     if (!user) {
       Alert.alert('Authentication Required', 'You must be logged in to submit a form.');
       return;
@@ -592,13 +607,13 @@ export default function FormScreen() {
     } else {
       setSubmitting(true);
     }
-    
-    try {      
+
+    try {
       const scoreResult = calculateScore();
       const autoFailCheck = checkAutoFail();
       let finalMarks = Math.round(scoreResult.totalScore * 100) / 100;
       let finalPercentage = Math.round(scoreResult.passPercentage * 100) / 100;
-      
+
       // Use form threshold instead of hardcoded 60%
       let finalResult = finalPercentage >= formThreshold ? 'pass' : 'failed';
 
@@ -606,15 +621,13 @@ export default function FormScreen() {
         finalResult = 'failed';
         finalPercentage = 1;
         finalMarks = 0.1;
-      }
-
-      // Set status based on whether it's a draft or final submission
+      }      // Set status based on whether it's a draft or final submission
       let finalStatus: string;
       if (isDraft) {
         finalStatus = 'draft';
       } else {
-        // All submitted audits go to "pending" status for manager verification
-        finalStatus = 'pending';
+        // If audit passes, mark as complete. If it fails, it goes to pending for manager verification
+        finalStatus = finalResult === 'pass' ? 'complete' : 'pending';
       }
 
       const currentData = {
@@ -629,7 +642,9 @@ export default function FormScreen() {
         comments: userComments || null,
         audit_data: values,
         existingAuditId: isEditing ? existingAuditId : null,
-      };      // Handle offline scenarios
+      };
+
+      // Handle offline scenarios
       if (!isOnline) {
         const offlineSaved = await saveOfflineData(currentData, isDraft);
         if (offlineSaved) {
@@ -638,7 +653,7 @@ export default function FormScreen() {
           if (!isDraft) {
             setHasOfflineSubmission(true); // Set indicator for offline submission
           }
-          
+
           if (isDraft) {
             Alert.alert(
               'Draft Saved Offline',
@@ -719,10 +734,11 @@ export default function FormScreen() {
         auditError = insertResult.error;
       }
 
-      if (auditError) {        // If network error during online submission, fallback to offline storage
-        if (auditError.message?.includes('Failed to fetch') || 
-            auditError.message?.includes('NetworkError') ||
-            auditError.message?.includes('fetch')) {
+      if (auditError) {
+        // If network error during online submission, fallback to offline storage
+        if (auditError.message?.includes('Failed to fetch') ||
+          auditError.message?.includes('NetworkError') ||
+          auditError.message?.includes('fetch')) {
           console.log('Network error during submission, saving offline...');
           const offlineSaved = await saveOfflineData(currentData, isDraft);
           if (offlineSaved) {
@@ -758,15 +774,18 @@ export default function FormScreen() {
               }
             }
           ]
-        );
-      } else {
+        );      } else {
         const actionText = isEditing ? 'updated' : 'submitted';
         const thresholdText = `Threshold: ${formThreshold}%`;
         const resultText = finalResult === 'pass' ? 'MEETS THRESHOLD' : 'BELOW THRESHOLD';
-        
+        const statusText = finalResult === 'pass' ? 'COMPLETE' : 'PENDING VERIFICATION';
+        const statusMessage = finalResult === 'pass' 
+          ? 'Form meets the threshold and has been marked as complete.'
+          : 'Form is below threshold and requires manager verification.';
+
         Alert.alert(
           `Audit ${isEditing ? 'Updated' : 'Submitted'}`,
-          `Form ${actionText} successfully and is now pending manager verification.\n\nScore: ${finalMarks}/${scoreResult.maxScore}\nPercentage: ${finalPercentage.toFixed(1)}%\n${thresholdText}\nResult: ${resultText}\nStatus: PENDING VERIFICATION`,
+          `Form ${actionText} successfully.\n\n${statusMessage}\n\nScore: ${finalMarks}/${scoreResult.maxScore}\nPercentage: ${finalPercentage.toFixed(1)}%\n${thresholdText}\nResult: ${resultText}\nStatus: ${statusText}`,
           [
             {
               text: 'View Audit History',
@@ -788,13 +807,14 @@ export default function FormScreen() {
       } else if (error?.message?.includes('authentication')) {
         errorMessage = 'Authentication required. Please log in and try again.';
       }
-      
+
       Alert.alert('Error', errorMessage);
     } finally {
       setSubmitting(false);
       setSavingDraft(false);
     }
   };
+
   const handleSubmit = async () => {
     if (!validateForm()) {
       Alert.alert('Validation Error', 'Please fill in all required fields');
@@ -821,9 +841,11 @@ export default function FormScreen() {
       Alert.alert('Title Required', 'Please provide an audit title before saving as draft.');
       return;
     }
-    
+
     await submitForm(true);
-  };  // Auto-save functions
+  };
+
+  // Auto-save functions
   const saveDraftSilently = async (): Promise<boolean> => {
     if (!user || !profile?.tenant_id || !auditTitle.trim()) {
       return false;
@@ -831,7 +853,7 @@ export default function FormScreen() {
 
     try {
       setAutoSaveStatus('saving');
-      
+
       const currentData = {
         form_id: parseInt(formId as string),
         user_id: user.id,
@@ -843,7 +865,9 @@ export default function FormScreen() {
         percentage: null,
         comments: userComments || null,
         audit_data: values,
-      };      // If offline, save to local storage
+      };
+
+      // If offline, save to local storage
       if (!isOnline) {
         const offlineSaved = await saveOfflineData(currentData, true); // true for draft
         if (offlineSaved) {
@@ -858,7 +882,7 @@ export default function FormScreen() {
       }
 
       let auditData, auditError;
-      
+
       if (isEditing && existingAuditId) {
         // Update existing audit
         const updateResult = await supabase
@@ -885,17 +909,18 @@ export default function FormScreen() {
 
         auditData = insertResult.data;
         auditError = insertResult.error;
-        
+
         if (!auditError && auditData) {
           setIsEditing(true);
           setExistingAuditId(auditData.id);
         }
       }
 
-      if (auditError) {        // Special handling for offline/network errors - fallback to offline storage
-        if (auditError.message?.includes('Failed to fetch') || 
-            auditError.message?.includes('NetworkError') ||
-            auditError.message?.includes('fetch')) {
+      if (auditError) {
+        // Special handling for offline/network errors - fallback to offline storage
+        if (auditError.message?.includes('Failed to fetch') ||
+          auditError.message?.includes('NetworkError') ||
+          auditError.message?.includes('fetch')) {
           console.log('Network error detected, saving offline...');
           const offlineSaved = await saveOfflineData(currentData, true); // true for draft
           if (offlineSaved) {
@@ -915,10 +940,10 @@ export default function FormScreen() {
       return true;
     } catch (error) {
       // Handle network errors gracefully - fallback to offline storage
-      if (error instanceof Error && 
-          (error.message.includes('Failed to fetch') || 
-           error.message.includes('NetworkError') ||
-           error.message.includes('fetch'))) {
+      if (error instanceof Error &&
+        (error.message.includes('Failed to fetch') ||
+          error.message.includes('NetworkError') ||
+          error.message.includes('fetch'))) {
         console.log('Network error caught, saving offline...');
         const currentData = {
           form_id: parseInt(formId as string),
@@ -931,7 +956,9 @@ export default function FormScreen() {
           percentage: null,
           comments: userComments || null,
           audit_data: values,
-        };        const offlineSaved = await saveOfflineData(currentData, true); // true for draft
+        };
+
+        const offlineSaved = await saveOfflineData(currentData, true); // true for draft
         if (offlineSaved) {
           setLastSaved(new Date());
           setAutoSaveStatus('saved');
@@ -944,6 +971,7 @@ export default function FormScreen() {
       return false;
     }
   };
+
   const debouncedAutoSave = () => {
     if (autoSaveTimeoutId) {
       clearTimeout(autoSaveTimeoutId);
@@ -962,12 +990,14 @@ export default function FormScreen() {
     if (isOnline && !isViewMode && auditTitle.trim()) {
       await saveDraftSilently();
     }
-  };  // Network monitoring effect
+  };
+
+  // Network monitoring effect
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(state => {
       const wasOffline = !isOnline;
       setIsOnline(state.isConnected ?? false);
-      
+
       // Sync offline data when coming back online
       if (wasOffline && state.isConnected) {
         syncOfflineData().then(synced => {
@@ -983,7 +1013,9 @@ export default function FormScreen() {
     });
 
     return () => unsubscribe();
-  }, [isOnline, auditTitle]);// Load offline data on mount
+  }, [isOnline, auditTitle]);
+
+  // Load offline data on mount
   useEffect(() => {
     const loadOfflineData = async () => {
       if (user && profile?.tenant_id) {
@@ -997,7 +1029,7 @@ export default function FormScreen() {
           setIsEditing(true);
           console.log('Offline draft data restored - will sync when online');
         }
-        
+
         // Check for offline submitted data
         const offlineSubmitted = await getOfflineData(false);
         setHasOfflineSubmission(offlineSubmitted && offlineSubmitted.isOffline);
@@ -1006,6 +1038,7 @@ export default function FormScreen() {
 
     loadOfflineData();
   }, [user, profile?.tenant_id]);
+
   // Auto-save when form values change
   useEffect(() => {
     // Removed periodic auto-save - only save when going offline
@@ -1020,6 +1053,7 @@ export default function FormScreen() {
       }
     };
   }, [autoSaveTimeoutId]);
+
   // Force auto-save when going offline
   useEffect(() => {
     if (!isOnline && auditTitle.trim() && !isViewMode) {
@@ -1036,8 +1070,10 @@ export default function FormScreen() {
     const value = values[field.id];
     const hasError = !!errors[field.id];
 
-    switch (field.type) {      case 'text':
-      case 'textarea':        return (
+    switch (field.type) {
+      case 'text':
+      case 'textarea':
+        return (
           <TextInput
             style={[
               styles.input,
@@ -1060,7 +1096,10 @@ export default function FormScreen() {
             editable={!isViewMode}
             autoCorrect={field.type === 'textarea'}
           />
-        );      case 'number':        return (
+        );
+
+      case 'number':
+        return (
           <TextInput
             style={[
               styles.input,
@@ -1137,33 +1176,57 @@ export default function FormScreen() {
           );
         }
 
-        return (
-          <View style={[
-            styles.pickerContainer,
-            hasError && styles.inputError,
-            isViewMode && styles.inputReadOnly          ]}>
-            <Picker
-              selectedValue={value || ''}
-              onValueChange={(itemValue) => !isViewMode && handleChange(field.id, String(itemValue))}
-              style={[styles.picker, isViewMode && styles.pickerReadOnly]}
-              enabled={!isViewMode}            >
+        return (<View style={[
+          styles.pickerContainer,
+          hasError && styles.inputError,
+          isViewMode && styles.inputReadOnly
+        ]}>
+          <Picker
+            selectedValue={value || ''}
+            onValueChange={(itemValue) => !isViewMode && handleChange(field.id, String(itemValue))}
+            style={[styles.picker, isViewMode && styles.pickerReadOnly]}
+            enabled={!isViewMode}
+            itemStyle={{
+              fontSize: 16,
+              height: 48,
+              ...Platform.select({
+                ios: {
+                  textAlign: 'left',
+                },
+              }),
+            }}
+          >
+            <Picker.Item
+              label={field.placeholder || 'Select an option...'}
+              value=""
+              color="#9ca3af"
+              style={{
+                fontSize: 16,
+                ...Platform.select({
+                  android: {
+                    backgroundColor: 'transparent',
+                  },
+                }),
+              }}
+            />
+            {validOptions.map((option, index) => (
               <Picker.Item
-                label={field.placeholder || 'Select an option...'}
-                value=""
-                color="#9ca3af"
-                style={{ fontSize: 16 }}
+                key={`${field.id}-${option.value}-${index}`}
+                label={option.value}
+                value={option.value}
+                color={option.isFailOption ? '#ef4444' : '#374151'}
+                style={{
+                  fontSize: 16,
+                  ...Platform.select({
+                    android: {
+                      backgroundColor: 'transparent',
+                    },
+                  }),
+                }}
               />
-              {validOptions.map((option, index) => (
-                <Picker.Item
-                  key={`${field.id}-${option.value}-${index}`}
-                  label={option.value}
-                  value={option.value}
-                  color={option.isFailOption ? '#ef4444' : '#374151'}
-                  style={{ fontSize: 16 }}
-                />
-              ))}
-            </Picker>
-          </View>
+            ))}
+          </Picker>
+        </View>
         );
 
       case 'image':
@@ -1239,13 +1302,15 @@ export default function FormScreen() {
         );
 
       case 'section':
-        return null;      case 'checkbox':
+        return null;
+
+      case 'checkbox':
         // Handle checkbox group if enhancedOptions exist
         if (field.enhancedOptions && field.enhancedOptions.length > 0) {
-          const checkboxOptions = field.enhancedOptions.filter(opt => 
+          const checkboxOptions = field.enhancedOptions.filter(opt =>
             typeof opt.value === 'string' && opt.value.trim() !== ''
           );
-          
+
           if (checkboxOptions.length === 0) {
             return (
               <View style={styles.errorContainer}>
@@ -1260,7 +1325,7 @@ export default function FormScreen() {
             <View style={styles.checkboxGroupContainer}>
               {checkboxOptions.map((option, index) => {
                 const isSelected = selectedValues.includes(option.value);
-                
+
                 return (
                   <Pressable
                     key={`${field.id}-checkbox-${option.value}-${index}`}
@@ -1283,10 +1348,10 @@ export default function FormScreen() {
                       isViewMode && styles.checkboxViewMode
                     ]}>
                       {isSelected && (
-                        <MaterialIcons 
-                          name="check" 
-                          size={18} 
-                          color={isViewMode ? "#6b7280" : "#ffffff"} 
+                        <MaterialIcons
+                          name="check"
+                          size={18}
+                          color={isViewMode ? "#6b7280" : "#ffffff"}
                         />
                       )}
                     </View>
@@ -1320,10 +1385,10 @@ export default function FormScreen() {
                 isViewMode && styles.checkboxViewMode
               ]}>
                 {value && (
-                  <MaterialIcons 
-                    name="check" 
-                    size={18} 
-                    color={isViewMode ? "#6b7280" : "#ffffff"} 
+                  <MaterialIcons
+                    name="check"
+                    size={18}
+                    color={isViewMode ? "#6b7280" : "#ffffff"}
                   />
                 )}
               </View>
@@ -1333,8 +1398,12 @@ export default function FormScreen() {
               ]}>
                 {field.placeholder || 'Check this option'}
               </Text>
-            </Pressable>          </View>
-        );      case 'email':        return (
+            </Pressable>
+          </View>
+        );
+
+      case 'email':
+        return (
           <TextInput
             style={[
               styles.input,
@@ -1381,11 +1450,13 @@ export default function FormScreen() {
             styles.pickerContainer,
             hasError && styles.inputError,
             isViewMode && styles.inputReadOnly
-          ]}>            <Picker
+          ]}>
+            <Picker
               selectedValue={value || ''}
               onValueChange={(itemValue) => !isViewMode && handleChange(field.id, String(itemValue))}
               style={[styles.picker, isViewMode && styles.pickerReadOnly]}
-              enabled={!isViewMode}            >
+              enabled={!isViewMode}
+            >
               <Picker.Item
                 label={field.placeholder || 'Select an option...'}
                 value=""
@@ -1481,10 +1552,10 @@ export default function FormScreen() {
               ]}>
                 {formattedDate || field.placeholder || 'Select date'}
               </Text>
-              <MaterialIcons 
-                name="calendar-today" 
-                size={20} 
-                color={isViewMode ? "#9ca3af" : "#6b7280"} 
+              <MaterialIcons
+                name="calendar-today"
+                size={20}
+                color={isViewMode ? "#9ca3af" : "#6b7280"}
               />
             </Pressable>
             {showDatePicker === field.id && !isViewMode && (
@@ -1528,6 +1599,7 @@ export default function FormScreen() {
       </Screen>
     );
   }
+
   return (
     <Screen style={styles.container}>
       <BackButton
@@ -1541,978 +1613,361 @@ export default function FormScreen() {
         title={isEditing || auditId ? "Back to History" : "Back to Forms"}
         style={styles.backButton}
       />
-      
-      <KeyboardAvoidingView 
+
+      <KeyboardAvoidingView
         style={styles.keyboardAvoidingView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
-      >
-        <View style={styles.header}>
-          <View style={styles.formTitleCard}>{(isViewMode || isEditing) && (
-            <View style={styles.modeIndicator}>
-              <Text style={[
-                styles.modeText,
-                isViewMode ? styles.viewModeTag : styles.editModeTag
-              ]}>
-                {isViewMode ? 'READ ONLY' : 'EDITING'}
-              </Text>
-            </View>
-          )}            {/* Auto-save status indicator - show offline status and pending submissions */}
-          {!isViewMode && (
-            <View style={styles.autoSaveIndicator}>
-              {!isOnline && (
-                <View style={styles.offlineIndicator}>
-                  <MaterialIcons name="wifi-off" size={16} color="#ef4444" />
-                  <Text style={styles.offlineText}>Offline</Text>
-                </View>
-              )}
-              {hasOfflineSubmission && (
-                <View style={styles.pendingSubmissionIndicator}>
-                  <MaterialIcons name="cloud-queue" size={16} color="#f59e0b" />
-                  <Text style={styles.pendingSubmissionText}>Pending Sync</Text>
-                </View>
-              )}
-              {!isOnline && autoSaveStatus !== 'idle' && (
-                <View style={[
-                  styles.autoSaveStatus,
-                  autoSaveStatus === 'saving' && styles.autoSaveStatusSaving,
-                  autoSaveStatus === 'saved' && styles.autoSaveStatusSaved,
-                  autoSaveStatus === 'error' && styles.autoSaveStatusError
+      >        <View style={styles.header}>
+          <View style={styles.formTitleCard}>
+            {(isViewMode || isEditing) && (
+              <View style={styles.modeIndicatorTop}>
+                <Text style={[
+                  styles.modeText,
+                  isViewMode ? styles.viewModeTag : styles.editModeTag
                 ]}>
-                  {autoSaveStatus === 'saving' && (
-                    <>
-                      <ActivityIndicator size={12} color="#6b7280" />
-                      <Text style={styles.autoSaveText}>Saving offline...</Text>
-                    </>
-                  )}
-                  {autoSaveStatus === 'saved' && (
-                    <>
-                      <MaterialIcons name="check" size={16} color="#10b981" />
-                      <Text style={styles.autoSaveText}>
-                        {lastSaved ? `Saved offline ${lastSaved.toLocaleTimeString()}` : 'Saved offline'}
-                      </Text>
-                    </>
-                  )}
-                  {autoSaveStatus === 'error' && (
-                    <>
-                      <MaterialIcons name="error" size={16} color="#ef4444" />
-                      <Text style={styles.autoSaveText}>Offline save failed</Text>
-                    </>
-                  )}
-                </View>
-              )}
-            </View>
-          )}<Text style={styles.title}>
-            {schema.title}
-          </Text>
-          {schema.description && (
-            <View style={styles.descriptionContainer}>
-              <Pressable 
-                style={styles.descriptionToggle}
-                onPress={() => setShowDescription(!showDescription)}
-              >
-                <Text style={styles.descriptionLabel}>Description</Text>
-                <MaterialIcons 
-                  name={showDescription ? "expand-less" : "expand-more"} 
-                  size={24} 
-                  color="#6b7280" 
-                />
-              </Pressable>
-              {showDescription && (
-                <Text style={styles.description}>{schema.description}</Text>
-              )}            </View>
-          )}
-          <View style={styles.formInfo}>
-            <Text style={styles.description}>
-              {schema.fields.filter(f => f.type !== 'section' && !f.isSection).length + 2} questions • Required fields are marked with *
+                  {isViewMode ? 'READ ONLY' : 'EDITING'}
+                </Text>
+              </View>
+            )}
+            {/* Auto-save status indicator - show offline status and pending submissions */}
+            {!isViewMode && (
+              <View style={styles.autoSaveIndicator}>
+                {!isOnline && (
+                  <View style={styles.offlineIndicator}>
+                    <MaterialIcons name="wifi-off" size={16} color="#ef4444" />
+                    <Text style={styles.offlineText}>Offline</Text>
+                  </View>
+                )}
+                {hasOfflineSubmission && (
+                  <View style={styles.pendingSubmissionIndicator}>
+                    <MaterialIcons name="cloud-queue" size={16} color="#f59e0b" />
+                    <Text style={styles.pendingSubmissionText}>Pending Sync</Text>
+                  </View>
+                )}
+                {!isOnline && autoSaveStatus !== 'idle' && (
+                  <View style={[
+                    styles.autoSaveStatus,
+                    autoSaveStatus === 'saving' && styles.autoSaveStatusSaving,
+                    autoSaveStatus === 'saved' && styles.autoSaveStatusSaved,
+                    autoSaveStatus === 'error' && styles.autoSaveStatusError
+                  ]}>
+                    {autoSaveStatus === 'saving' && (
+                      <>
+                        <ActivityIndicator size={12} color="#6b7280" />
+                        <Text style={styles.autoSaveText}>Saving offline...</Text>
+                      </>
+                    )}
+                    {autoSaveStatus === 'saved' && (
+                      <>
+                        <MaterialIcons name="check" size={16} color="#10b981" />
+                        <Text style={styles.autoSaveText}>
+                          {lastSaved ? `Saved offline ${lastSaved.toLocaleTimeString()}` : 'Saved offline'}
+                        </Text>
+                      </>
+                    )}
+                    {autoSaveStatus === 'error' && (
+                      <>
+                        <MaterialIcons name="error" size={16} color="#ef4444" />
+                        <Text style={styles.autoSaveText}>Offline save failed</Text>
+                      </>
+                    )}
+                  </View>
+                )}
+              </View>
+            )}
+            <Text style={styles.title}>
+              {schema.title}
             </Text>
-          </View>
-        </View>
-      </View>      <ScrollView
-        ref={scrollViewRef}
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="always"
-        keyboardDismissMode="on-drag"
-        nestedScrollEnabled={true}
-      >{/* Audit Title Field */}
-        <View 
-          style={styles.fieldCard}
-          onLayout={(event) => handleFieldLayout('auditTitle', event)}
-        >
-          <View style={styles.fieldHeader}>
-            <Text style={styles.fieldNumber}>1.</Text>
-            <View style={styles.fieldTitleContainer}>
-              <Text style={styles.fieldLabel}>
-                Audit Title
-                <Text style={styles.required}> *</Text>
+            {schema.description && (
+              <View style={styles.descriptionContainer}>
+                <Pressable
+                  style={styles.descriptionToggle}
+                  onPress={() => setShowDescription(!showDescription)}
+                >
+                  <Text style={styles.descriptionLabel}>Description</Text>
+                  <MaterialIcons
+                    name={showDescription ? "expand-less" : "expand-more"}
+                    size={24}
+                    color="#6b7280"
+                  />
+                </Pressable>
+                {showDescription && (
+                  <Text style={styles.description}>{schema.description}</Text>
+                )}
+              </View>
+            )}
+            <View style={styles.formInfo}>
+              <Text style={styles.description}>
+                {schema.fields.filter(f => f.type !== 'section' && !f.isSection).length + 2} questions • Required fields are marked with *
               </Text>
             </View>
-          </View>
-          <View style={styles.fieldInputContainer}>
-            <TextInput
-              style={[
-                styles.input,
-                errors['auditTitle'] && styles.inputError,
-                isViewMode && styles.inputReadOnly
-              ]}
-              placeholder="Enter audit title..."
-              value={auditTitle}              onChangeText={(text) => {
-                setAuditTitle(text);
-                if (errors['auditTitle']) {
-                  setErrors(prev => ({ ...prev, auditTitle: '' }));
-                }
-                // No auto-save during normal editing
-              }}
-              onFocus={() => {
-                if (!isViewMode) {
-                  setTimeout(() => {
-                    scrollToField('auditTitle');
-                  }, 100);
-                }
-              }}
-              editable={!isViewMode}
-            />
-            {errors['auditTitle'] && (
-              <Text style={styles.errorText}>{errors['auditTitle']}</Text>
-            )}
           </View>
         </View>
 
-        {/* Form Fields */}        {schema.fields.map((field, index) => {
-          if (field.type === 'section' || field.isSection) {
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode="on-drag"
+          nestedScrollEnabled={true}
+        >
+          {/* Audit Title Field */}
+          <View
+            style={styles.fieldCard}
+            onLayout={(event) => handleFieldLayout('auditTitle', event)}
+          >
+            <View style={styles.fieldHeader}>
+              <Text style={styles.fieldNumber}>1.</Text>
+              <View style={styles.fieldTitleContainer}>
+                <Text style={styles.fieldLabel}>
+                  Audit Title
+                  <Text style={styles.required}> *</Text>
+                </Text>
+              </View>
+            </View>
+            <View style={styles.fieldInputContainer}>
+              <TextInput
+                style={[
+                  styles.input,
+                  errors['auditTitle'] && styles.inputError,
+                  isViewMode && styles.inputReadOnly
+                ]}
+                placeholder="Enter audit title..."
+                value={auditTitle}
+                onChangeText={(text) => {
+                  setAuditTitle(text);
+                  if (errors['auditTitle']) {
+                    setErrors(prev => ({ ...prev, auditTitle: '' }));
+                  }
+                  // No auto-save during normal editing
+                }}
+                onFocus={() => {
+                  if (!isViewMode) {
+                    setTimeout(() => {
+                      scrollToField('auditTitle');
+                    }, 100);
+                  }
+                }}
+                editable={!isViewMode}
+              />
+              {errors['auditTitle'] && (
+                <Text style={styles.errorText}>{errors['auditTitle']}</Text>
+              )}
+            </View>
+          </View>
+
+          {/* Form Fields */}
+          {schema.fields.map((field, index) => {
+            if (field.type === 'section' || field.isSection) {
+              return (
+                <View key={field.id} style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>{field.label}</Text>
+                  {field.description && (
+                    <Text style={styles.sectionDescription}>{field.description}</Text>
+                  )}
+                </View>
+              );
+            }
+
+            // Calculate sequential question number (excluding sections)
+            const questionNumber = schema.fields.slice(0, index + 1).filter(f => f.type !== 'section' && !f.isSection).length + 1;
             return (
-              <View key={field.id} style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>{field.label}</Text>
-                {field.description && (
-                  <Text style={styles.sectionDescription}>{field.description}</Text>
+              <View
+                key={field.id}
+                style={styles.fieldCard}
+                onLayout={(event) => handleFieldLayout(field.id, event)}
+              >
+                <View style={styles.fieldHeader}>
+                  <Text style={styles.fieldNumber}>{questionNumber}.</Text>
+                  <View style={styles.fieldTitleContainer}>
+                    <Text style={styles.fieldLabel}>
+                      {field.label}
+                      {field.required && <Text style={styles.required}> *</Text>}
+                    </Text>
+                    {field.description && (
+                      <Text style={styles.fieldDescription}>{field.description}</Text>
+                    )}
+                  </View>
+                </View>
+                <View style={styles.fieldInputContainer}>
+                  {renderField(field)}
+                </View>
+                {errors[field.id] && (
+                  <Text style={styles.errorText}>{errors[field.id]}</Text>
                 )}
               </View>
             );
-          }
+          })}
 
-          // Calculate sequential question number (excluding sections)
-          const questionNumber = schema.fields.slice(0, index + 1).filter(f => f.type !== 'section' && !f.isSection).length + 1;          return (
-            <View 
-              key={field.id} 
-              style={styles.fieldCard}
-              onLayout={(event) => handleFieldLayout(field.id, event)}
-            >
-              <View style={styles.fieldHeader}>
-                <Text style={styles.fieldNumber}>{questionNumber}.</Text>
-                <View style={styles.fieldTitleContainer}>
-                  <Text style={styles.fieldLabel}>
-                    {field.label}
-                    {field.required && <Text style={styles.required}> *</Text>}
-                  </Text>
-                  {field.description && (
-                    <Text style={styles.fieldDescription}>{field.description}</Text>
-                  )}
-                </View>
+          {/* Comments Field */}
+          <View
+            style={styles.fieldCard}
+            onLayout={(event) => handleFieldLayout('comments', event)}
+          >
+            <View style={styles.fieldHeader}>
+              <Text style={styles.fieldNumber}>{schema.fields.filter(f => f.type !== 'section' && !f.isSection).length + 2}.</Text>
+              <View style={styles.fieldTitleContainer}>
+                <Text style={styles.fieldLabel}>
+                  Comments
+                  <Text style={styles.optional}> (Optional)</Text>
+                </Text>
+                <Text style={styles.fieldDescription}>
+                  Add any additional comments, observations, or notes about this audit
+                </Text>
               </View>
-              <View style={styles.fieldInputContainer}>
-                {renderField(field)}
-              </View>
-              {errors[field.id] && (
-                <Text style={styles.errorText}>{errors[field.id]}</Text>
-              )}
             </View>
-          );
-        })}        {/* Comments Field */}
-        <View 
-          style={styles.fieldCard}
-          onLayout={(event) => handleFieldLayout('comments', event)}
-        >
-          <View style={styles.fieldHeader}>
-            <Text style={styles.fieldNumber}>{schema.fields.filter(f => f.type !== 'section' && !f.isSection).length + 2}.</Text>
-            <View style={styles.fieldTitleContainer}>
-              <Text style={styles.fieldLabel}>
-                Comments
-                <Text style={styles.optional}> (Optional)</Text>
-              </Text>
-              <Text style={styles.fieldDescription}>
-                Add any additional comments, observations, or notes about this audit
-              </Text>
+            <View style={styles.fieldInputContainer}>
+              <TextInput
+                style={[
+                  styles.input,
+                  styles.commentsInput,
+                  isViewMode && styles.inputReadOnly
+                ]}
+                placeholder="Add any additional comments or observations..."
+                value={userComments}
+                onChangeText={setUserComments}
+                onFocus={() => {
+                  if (!isViewMode) {
+                    setTimeout(() => {
+                      scrollToField('comments');
+                    }, 100);
+                  }
+                }}
+                multiline={true}
+                numberOfLines={4}
+                textAlignVertical="top"
+                editable={!isViewMode}
+              />
             </View>
           </View>
-          <View style={styles.fieldInputContainer}>            <TextInput
-              style={[
-                styles.input,
-                styles.commentsInput,
-                isViewMode && styles.inputReadOnly
-              ]}
-              placeholder="Add any additional comments or observations..."
-              value={userComments}
-              onChangeText={setUserComments}
-              onFocus={() => {
-                if (!isViewMode) {
-                  setTimeout(() => {
-                    scrollToField('comments');
-                  }, 100);
-                }
-              }}
-              multiline={true}
-              numberOfLines={4}
-              textAlignVertical="top"
-              editable={!isViewMode}
-            />          </View>
-        </View>        {/* Save/Submit Buttons - Now inside ScrollView at bottom of form content */}
-        {!isViewMode && (
-          <View style={styles.submitContainer}>
-            <Pressable
-              style={[styles.draftButton, savingDraft && styles.draftButtonDisabled]}
-              onPress={saveDraft}
-              disabled={savingDraft || submitting}
-            >
-              <MaterialIcons name="save" size={20} color="#6b7280" />
-              <Text style={styles.draftButtonText}>
-                {savingDraft ? 'Saving...' : !isOnline ? 'Save Offline' : 'Save as Draft'}
-              </Text>
-            </Pressable>
-            
-            <Pressable
-              style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
-              onPress={handleSubmit}
-              disabled={submitting || savingDraft}
-            >
-              <Text style={styles.submitButtonText}>
-                {submitting 
-                  ? (isEditing ? 'Updating...' : 'Submitting...') 
-                  : !isOnline 
-                    ? (isEditing ? 'Update Offline' : 'Submit Offline')
-                    : (isEditing ? 'Update Audit' : 'Submit Form')
-                }
-              </Text>
-            </Pressable>
-          </View>
+
+          {/* Save/Submit Buttons - Now inside ScrollView at bottom of form content */}
+          {!isViewMode && (
+            <View style={styles.submitContainer}>
+              <Pressable
+                style={[styles.draftButton, savingDraft && styles.draftButtonDisabled]}
+                onPress={saveDraft}
+                disabled={savingDraft || submitting}
+              >
+                <MaterialIcons name="save" size={20} color="#6b7280" />
+                <Text style={styles.draftButtonText}>
+                  {savingDraft ? 'Saving...' : !isOnline ? 'Save Offline' : 'Save as Draft'}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
+                onPress={handleSubmit}
+                disabled={submitting || savingDraft}
+              >
+                <Text style={styles.submitButtonText}>
+                  {submitting
+                    ? (isEditing ? 'Updating...' : 'Submitting...')
+                    : !isOnline
+                      ? (isEditing ? 'Update Offline' : 'Submit Offline')
+                      : (isEditing ? 'Update Audit' : 'Submit Form')
+                  }
+                </Text>
+              </Pressable>
+            </View>
+          )}
+        </ScrollView>
+
+        {isViewMode && (
+          <Pressable
+            style={styles.floatingEditButton}
+            onPress={() => {
+              setIsViewMode(false);
+              // No Alert to prevent keyboard interference
+              // Edit mode is clearly indicated by the mode indicator
+            }}
+          >
+            <MaterialIcons name="edit" size={24} color="#ffffff" />
+          </Pressable>
         )}
-      </ScrollView>{isViewMode && (        <Pressable
-          style={styles.floatingEditButton}
-          onPress={() => {
-            setIsViewMode(false);
-            // No Alert to prevent keyboard interference
-            // Edit mode is clearly indicated by the mode indicator
-          }}
-        ><MaterialIcons name="edit" size={24} color="#ffffff" />
-        </Pressable>
-      )}
       </KeyboardAvoidingView>
     </Screen>
   );
 }
 
-const styles = StyleSheet.create({  container: {
+const styles = StyleSheet.create({
+  container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#f3f4f6',
   },
   keyboardAvoidingView: {
     flex: 1,
   },
   backButton: {
+    marginLeft: 16,
     marginTop: 16,
-    marginHorizontal: 16,
   },
   header: {
     paddingHorizontal: 16,
-    marginBottom: 24,
+    paddingTop: 16,
+    paddingBottom: 8,
   },
   formTitleCard: {
     backgroundColor: '#ffffff',
     borderRadius: 12,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: '#f3f4f6',
-  },
-  formInfo: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1f2937',
+    padding: 16,
     marginBottom: 8,
-  },  description: {
-    fontSize: 16,
-    color: '#6b7280',
-    lineHeight: 24,
-    marginTop: 8,
-  },
-  descriptionContainer: {
-    marginTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
-    paddingTop: 12,
-  },
-  descriptionToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-  },
-  descriptionLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  editingNotice: {
-    backgroundColor: '#fef3c7',
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#f59e0b',
-  },
-  editingText: {
-    fontSize: 14,
-    color: '#92400e',
-    fontWeight: '500',
-  },
-  scrollView: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },  scrollContent: {
-    paddingBottom: 20, // Reduced padding since buttons are now inside ScrollView
-  },
-  fieldCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 16,
-    marginHorizontal: 0,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: '#f3f4f6',
-  },
-  fieldHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  fieldNumber: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#6b7280',
-    marginRight: 8,
-    marginTop: 2,
-  },
-  fieldTitleContainer: {
-    flex: 1,
-  },
-  fieldDescription: {
-    fontSize: 14,
-    color: '#6b7280',
-    marginTop: 4,
-    lineHeight: 20,
-  },
-  fieldInputContainer: {
-    marginTop: 8,
-  },
-  fieldLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 8,
-  },
-  required: {
-    color: '#ef4444',
-    fontWeight: 'bold',
-  },
-  optional: {
-    color: '#9ca3af',
-    fontSize: 14,
-    fontWeight: 'normal',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    backgroundColor: '#ffffff',
-    color: '#1f2937',
-  },
-  inputReadOnly: {
-    backgroundColor: '#f9fafb',
-    color: '#6b7280',
-    borderColor: '#e5e7eb',
-  },
-  commentsInput: {
-    minHeight: 100,
-    textAlignVertical: 'top',
-  },
-  inputError: {
-    borderColor: '#ef4444',
-    borderWidth: 2,
-  },
-  booleanContainer: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  booleanOption: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#d1d5db',
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-  },
-  booleanSelected: {
-    borderColor: '#3b82f6',
-    backgroundColor: '#eff6ff',
-  },
-  booleanText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#6b7280',
-  },
-  booleanTextSelected: {
-    color: '#3b82f6',
-  },
-  booleanDisabled: {
-    backgroundColor: '#f9fafb',
-    borderColor: '#e5e7eb',
-  },
-  booleanTextDisabled: {
-    color: '#9ca3af',
-  },  pickerContainer: {
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    backgroundColor: '#ffffff',
-    overflow: 'hidden',
-    minHeight: 52, // Ensure minimum height to match input fields
-    justifyContent: 'center', // Center content vertically
-    paddingHorizontal: Platform.OS === 'ios' ? 8 : 0, // iOS needs padding
-  },
-  picker: {
-    height: Platform.OS === 'ios' ? 52 : 56, // Different heights for platforms
-    fontSize: 16, // Ensure readable font size
-    color: '#374151', // Set text color
-    backgroundColor: 'transparent',
-  },
-  pickerReadOnly: {
-    backgroundColor: '#f9fafb',
-    opacity: 0.8,
-  },submitContainer: {
-    paddingHorizontal: 0, // Remove horizontal padding since ScrollView already has it
-    paddingBottom: 20, // Bottom padding for form content
-    paddingTop: 24, // Top padding to separate from form fields
-    flexDirection: 'row',
-    gap: 12,
-  },
-  draftButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f9fafb',
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    gap: 8,
-  },
-  draftButtonDisabled: {
-    opacity: 0.6,
-  },
-  draftButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#6b7280',
-  },
-  submitButton: {
-    flex: 1,
-    backgroundColor: '#3b82f6',
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    shadowColor: '#3b82f6',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  submitButtonDisabled: {
-    backgroundColor: '#9ca3af',
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  submitButtonText: {
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  errorContainer: {
-    padding: 8,
-    backgroundColor: '#fef2f2',
-    borderRadius: 4,
-  },
-  errorText: {
-    color: '#ef4444',
-    fontSize: 14,
-    marginTop: 4,
-    fontWeight: '500',
-  },
-  unsupportedFieldContainer: {
-    padding: 8,
-    backgroundColor: '#fffbeb',
-    borderRadius: 4,
-  },
-  unsupportedField: {
-    color: '#f59e0b',
-    fontSize: 14,
-    fontStyle: 'italic',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#6b7280',
-    textAlign: 'center',
-  },
-  error: {
-    color: '#ef4444',
-    textAlign: 'center',
-    marginTop: 40,
-    fontSize: 16,
-  },
-  imageContainer: {
-    marginTop: 8,
-  },
-  uploadArea: {
-    borderWidth: 2,
-    borderColor: '#e5e7eb',
-    borderStyle: 'dashed',
-    borderRadius: 16,
-    backgroundColor: '#fafafa',
-    padding: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 160,
-  },
-  uploadAreaError: {
-    borderColor: '#ef4444',
-    backgroundColor: '#fef2f2',
-  },
-  uploadAreaDisabled: {
-    backgroundColor: '#f9fafb',
-    borderColor: '#e5e7eb',
-    opacity: 0.6,
-  },
-  uploadContent: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  uploadTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#374151',
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  uploadSubtitle: {
-    fontSize: 14,
-    color: '#6b7280',
-    textAlign: 'center',
-    lineHeight: 20,
-    maxWidth: 240,
-  },
-  uploadingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-  },
-  uploadingText: {
-    fontSize: 16,
-    color: '#3b82f6',
-    fontWeight: '600',
-  },
-  imagePreview: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: '#ffffff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  previewImage: {
-    width: '100%',
-    height: 200,
-    resizeMode: 'cover',
-  },
-  imageActions: {
-    flexDirection: 'row',
-    backgroundColor: '#ffffff',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    justifyContent: 'space-between',
-    borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
-  },
-  changeImageButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#eff6ff',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-    flex: 1,
-    marginRight: 8,
-    justifyContent: 'center',
-  },
-  changeImageText: {
-    fontSize: 14,
-    color: '#3b82f6',
-    fontWeight: '600',
-    marginLeft: 6,
-  },
-  removeImageButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fef2f2',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-    flex: 1,
-    marginLeft: 8,
-    justifyContent: 'center',
-  },
-  removeImageText: {
-    fontSize: 14,
-    color: '#ef4444',
-    fontWeight: '600',
-    marginLeft: 6,
-  },
-  imageOverlay: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    shadowRadius: 3, elevation: 1,
+  }, modeIndicatorTop: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#f3f4f6',
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  imageInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  imageUploadedText: {
-    fontSize: 12,
-    color: '#10b981',
-    fontWeight: '600',
-    marginLeft: 4,
-  },
-  uploadIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#f3f4f6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  uploadHint: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
-  },
-  uploadHintText: {
-    fontSize: 12,
-    color: '#9ca3af',
-    textAlign: 'center',
-    fontWeight: '500',
-  },
-  uploadingIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#eff6ff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  uploadingContent: {
-    flex: 1,
-  },
-  uploadingSubtext: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginTop: 2,
+    borderRadius: 12,
+    marginBottom: 12,
+    minWidth: 80,
   },
   modeIndicator: {
-    alignSelf: 'flex-start',
-    marginBottom: 12,
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    minWidth: 80,
   },
   modeText: {
     fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
   },
   viewModeTag: {
-    backgroundColor: '#eff6ff',
-    color: '#1e40af',
+    color: '#6b7280',
   },
   editModeTag: {
-    backgroundColor: '#fef3c7',
-    color: '#92400e',
+    color: '#3b82f6',
   },
-  floatingEditButton: {
-    position: 'absolute',
-    right: 24,
-    bottom: 100,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#3b82f6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  checkboxContainer: {
-    marginVertical: 8,
-  },
-  checkboxWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: '#f9fafb',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  checkboxDisabled: {
-    backgroundColor: '#f3f4f6',
-    opacity: 0.6,
-  },
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
-    borderWidth: 2,
-    borderColor: '#d1d5db',
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  checkboxChecked: {
-    backgroundColor: '#3b82f6',
-    borderColor: '#3b82f6',
-  },
-  checkboxViewMode: {
-    borderColor: '#9ca3af',
-    backgroundColor: '#f3f4f6',
-  },
-  checkboxLabel: {
-    fontSize: 16,
-    color: '#374151',
-    flex: 1,
-  },  checkboxLabelViewMode: {
-    color: '#6b7280',
-  },
-  checkboxLabelFail: {
-    color: '#ef4444',
-    fontWeight: '600',
-  },
-  // Checkbox group styles
-  checkboxGroupContainer: {
-    marginVertical: 8,
-  },
-  checkboxGroupOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: '#f9fafb',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    marginBottom: 8,
-  },
-  sectionHeader: {
-    marginTop: 32,
-    marginBottom: 16,
-    marginHorizontal: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 2,
-    borderBottomColor: '#3b82f6',
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1e293b',
-    marginBottom: 4,
-  },  sectionDescription: {
-    fontSize: 14,
-    color: '#64748b',
-    lineHeight: 20,
-  },
-  // Radio button styles
-  radioContainer: {
-    marginVertical: 8,
-  },
-  radioOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: '#f9fafb',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    marginBottom: 8,
-  },
-  radioDisabled: {
-    backgroundColor: '#f3f4f6',
-    opacity: 0.6,
-  },
-  radioButton: {
-    marginRight: 12,
-  },
-  radioButtonOuter: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: '#d1d5db',
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  radioButtonSelected: {
-    borderColor: '#3b82f6',
-  },
-  radioButtonViewMode: {
-    borderColor: '#9ca3af',
-    backgroundColor: '#f3f4f6',
-  },
-  radioButtonInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#3b82f6',
-  },
-  radioButtonInnerViewMode: {
-    backgroundColor: '#6b7280',
-  },
-  radioLabel: {
-    fontSize: 16,
-    color: '#374151',
-    flex: 1,
-  },
-  radioLabelViewMode: {
-    color: '#6b7280',
-  },
-  radioLabelFail: {
-    color: '#ef4444',
-    fontWeight: '600',
-  },
-  // Date input styles
-  dateInput: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    minHeight: 56,
-  },
-  dateText: {
-    fontSize: 16,
-    color: '#374151',
-    flex: 1,
-  },
-  datePlaceholder: {
-    color: '#9ca3af',
-  },  dateTextViewMode: {
-    color: '#6b7280',
-  },
-  // Auto-save styles
   autoSaveIndicator: {
-    marginTop: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    marginBottom: 8,
+    flexWrap: 'wrap',
   },
   offlineIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fef2f2',
+    backgroundColor: '#fee2e2',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#fecaca',
+    borderRadius: 12,
+    marginRight: 8,
   },
   offlineText: {
     fontSize: 12,
-    color: '#ef4444',
+    color: '#dc2626',
     marginLeft: 4,
-    fontWeight: '500',
-  },
-  autoSaveStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f9fafb',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  autoSaveStatusSaving: {
-    backgroundColor: '#fef3c7',
-    borderColor: '#fde68a',
-  },
-  autoSaveStatusSaved: {
-    backgroundColor: '#ecfdf5',
-    borderColor: '#bbf7d0',
-  },
-  autoSaveStatusError: {
-    backgroundColor: '#fef2f2',
-    borderColor: '#fecaca',
-  },
-  autoSaveText: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginLeft: 4,
-    fontWeight: '500',
   },
   pendingSubmissionIndicator: {
     flexDirection: 'row',
@@ -2520,14 +1975,529 @@ const styles = StyleSheet.create({  container: {
     backgroundColor: '#fef3c7',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#fde68a',
+    borderRadius: 12,
+    marginRight: 8,
   },
   pendingSubmissionText: {
     fontSize: 12,
-    color: '#f59e0b',
+    color: '#d97706',
     marginLeft: 4,
+  },
+  autoSaveStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginRight: 8,
+  },
+  autoSaveStatusSaving: {
+    backgroundColor: '#f3f4f6',
+  },
+  autoSaveStatusSaved: {
+    backgroundColor: '#ecfdf5',
+  },
+  autoSaveStatusError: {
+    backgroundColor: '#fee2e2',
+  },
+  autoSaveText: {
+    fontSize: 12,
+    marginLeft: 4,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#111827',
+    marginBottom: 8,
+  },
+  descriptionContainer: {
+    marginBottom: 12,
+  },
+  descriptionToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  descriptionLabel: {
+    fontSize: 14,
+    color: '#6b7280',
     fontWeight: '500',
+  },
+  description: {
+    fontSize: 14,
+    color: '#4b5563',
+    marginTop: 8,
+    lineHeight: 20,
+  },
+  formInfo: {
+    marginTop: 8,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 24,
+  },
+  fieldCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  fieldHeader: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  fieldNumber: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#3b82f6',
+    marginRight: 8,
+  },
+  fieldTitleContainer: {
+    flex: 1,
+  },
+  fieldLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  fieldDescription: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginTop: 4,
+  },
+  fieldInputContainer: {
+    marginTop: 8,
+  },
+  input: {
+    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: '#111827',
+  },
+  inputError: {
+    borderColor: '#ef4444',
+  },
+  inputReadOnly: {
+    backgroundColor: '#f3f4f6',
+    color: '#6b7280',
+  },
+  booleanContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  booleanOption: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    alignItems: 'center',
+    marginHorizontal: 4,
+  },
+  booleanSelected: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#3b82f6',
+  },
+  booleanDisabled: {
+    backgroundColor: '#f3f4f6',
+  },
+  booleanText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#6b7280',
+  },
+  booleanTextSelected: {
+    color: '#ffffff',
+  },
+  booleanTextDisabled: {
+    color: '#9ca3af',
+  }, pickerContainer: {
+    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    overflow: 'hidden',
+    minHeight: 56,
+  },
+  picker: {
+    height: 56,
+    fontSize: 16,
+    color: '#111827',
+    paddingVertical: 4,
+    ...Platform.select({
+      android: {
+        backgroundColor: 'transparent',
+        marginLeft: 8,
+        marginRight: 8,
+        paddingHorizontal: 8,
+      },
+      ios: {
+        backgroundColor: 'transparent',
+        paddingHorizontal: 12,
+      },
+    }),
+  },
+  pickerReadOnly: {
+    backgroundColor: '#f3f4f6',
+  },
+  imageContainer: {
+    marginTop: 8,
+  },
+  imagePreview: {
+    position: 'relative',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  previewImage: {
+    width: '100%',
+    height: 200,
+    resizeMode: 'cover',
+  },
+  imageOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    justifyContent: 'flex-end',
+  },
+  imageInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 8,
+    backgroundColor: 'rgba(255,255,255,0.8)',
+  },
+  imageUploadedText: {
+    marginLeft: 4,
+    fontSize: 14,
+    color: '#065f46',
+  },
+  imageActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 8,
+    backgroundColor: '#ffffff',
+  },
+  changeImageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 8,
+  },
+  changeImageText: {
+    marginLeft: 4,
+    color: '#3b82f6',
+    fontSize: 14,
+  },
+  removeImageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 8,
+  },
+  removeImageText: {
+    marginLeft: 4,
+    color: '#ef4444',
+    fontSize: 14,
+  },
+  uploadArea: {
+    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  uploadAreaError: {
+    borderColor: '#ef4444',
+  },
+  uploadAreaDisabled: {
+    backgroundColor: '#f3f4f6',
+  },
+  uploadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  uploadingIcon: {
+    marginRight: 12,
+  },
+  uploadingContent: {
+    alignItems: 'flex-start',
+  },
+  uploadingText: {
+    fontSize: 16,
+    color: '#111827',
+    marginBottom: 2,
+  },
+  uploadingSubtext: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  uploadContent: {
+    alignItems: 'center',
+  },
+  uploadIcon: {
+    marginBottom: 8,
+  },
+  uploadTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  uploadSubtitle: {
+    fontSize: 14,
+    color: '#6b7280',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  uploadHint: {
+    backgroundColor: '#e5e7eb',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  uploadHintText: {
+    fontSize: 12,
+    color: '#4b5563',
+  },
+  sectionHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#f3f4f6',
+    marginBottom: 8,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#111827',
+  },
+  sectionDescription: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginTop: 4,
+  },
+  checkboxContainer: {
+    marginTop: 8,
+  },
+  checkboxWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  checkboxChecked: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#3b82f6',
+  },
+  checkboxViewMode: {
+    backgroundColor: '#e5e7eb',
+    borderColor: '#9ca3af',
+  },
+  checkboxLabel: {
+    fontSize: 16,
+    color: '#111827',
+  },
+  checkboxLabelViewMode: {
+    color: '#6b7280',
+  },
+  checkboxLabelFail: {
+    color: '#ef4444',
+  },
+  checkboxGroupContainer: {
+    marginTop: 8,
+  },
+  checkboxGroupOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  checkboxDisabled: {
+    opacity: 0.7,
+  },
+  radioContainer: {
+    marginTop: 8,
+  },
+  radioOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  radioDisabled: {
+    opacity: 0.7,
+  },
+  radioButton: {
+    marginRight: 12,
+  },
+  radioButtonOuter: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  radioButtonSelected: {
+    borderColor: '#3b82f6',
+  },
+  radioButtonViewMode: {
+    borderColor: '#9ca3af',
+  },
+  radioButtonInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#3b82f6',
+  },
+  radioButtonInnerViewMode: {
+    backgroundColor: '#6b7280',
+  },
+  radioLabel: {
+    fontSize: 16,
+    color: '#111827',
+  },
+  radioLabelViewMode: {
+    color: '#6b7280',
+  },
+  radioLabelFail: {
+    color: '#ef4444',
+  },
+  dateInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    padding: 12,
+  },
+  dateText: {
+    fontSize: 16,
+    color: '#111827',
+  },
+  datePlaceholder: {
+    color: '#9ca3af',
+  },
+  dateTextViewMode: {
+    color: '#6b7280',
+  },
+  commentsInput: {
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  submitContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    marginTop: 16,
+  },
+  draftButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f3f4f6',
+    borderRadius: 8,
+    padding: 16,
+    marginRight: 8,
+  },
+  draftButtonDisabled: {
+    opacity: 0.7,
+  },
+  draftButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6b7280',
+    marginLeft: 8,
+  },
+  submitButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#3b82f6',
+    borderRadius: 8,
+    padding: 16,
+    marginLeft: 8,
+  },
+  submitButtonDisabled: {
+    opacity: 0.7,
+  },
+  submitButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  floatingEditButton: {
+    position: 'absolute',
+    bottom: 24,
+    right: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#3b82f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  required: {
+    color: '#ef4444',
+  },
+  optional: {
+    color: '#6b7280',
+  },
+  errorContainer: {
+    backgroundColor: '#fee2e2',
+    padding: 12,
+    borderRadius: 8,
+  },
+  errorText: {
+    color: '#ef4444',
+    fontSize: 14,
+    marginTop: 8,
+  },
+  unsupportedFieldContainer: {
+    backgroundColor: '#fef3c7',
+    padding: 12,
+    borderRadius: 8,
+  },
+  unsupportedField: {
+    color: '#92400e',
+    fontSize: 14,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#6b7280',
+  },
+  error: {
+    fontSize: 16,
+    color: '#ef4444',
   },
 });

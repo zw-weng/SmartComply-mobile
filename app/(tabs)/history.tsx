@@ -2,18 +2,19 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  FlatList,
-  Modal,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    FlatList,
+    Modal,
+    Pressable,
+    RefreshControl,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
+import RejectionNotification from '../../components/RejectionNotification';
 import Screen from '../../components/Screen';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/useAuth';
@@ -91,13 +92,45 @@ export default function HistoryScreen() {
         if (!fallbackError && fallbackAudits) {
           finalAuditsData = fallbackAudits;
         }
-      }
-
-      if (!finalAuditsData || finalAuditsData.length === 0) {
+      }      if (!finalAuditsData || finalAuditsData.length === 0) {
         setAudits([]);
         setLoading(false);
         setRefreshing(false);
         return;
+      }
+
+      // Auto-migrate audits: update status to 'complete' for audits with 'pass' result but 'pending' status
+      const auditsToUpdate = finalAuditsData.filter(audit => 
+        audit.result === 'pass' && audit.status === 'pending'
+      );
+
+      if (auditsToUpdate.length > 0) {
+        console.log(`Found ${auditsToUpdate.length} audits to migrate from pending to complete status`);
+        
+        try {
+          const updatePromises = auditsToUpdate.map(audit =>
+            supabase
+              .from('audit')
+              .update({ status: 'complete' })
+              .eq('id', audit.id)
+              .eq('user_id', user.id)
+          );
+
+          await Promise.all(updatePromises);
+          
+          // Update the local data to reflect the changes
+          finalAuditsData = finalAuditsData.map(audit => {
+            if (audit.result === 'pass' && audit.status === 'pending') {
+              return { ...audit, status: 'complete' };
+            }
+            return audit;
+          });
+          
+          console.log(`Successfully migrated ${auditsToUpdate.length} audits to complete status`);
+        } catch (migrationError) {
+          console.error('Failed to migrate audit statuses:', migrationError);
+          // Continue with original data if migration fails
+        }
       }
 
       const userIds = [...new Set(finalAuditsData.map((audit) => audit.user_id))];
@@ -203,10 +236,9 @@ export default function HistoryScreen() {
         return 'help';
     }
   };
-
   const getStatusColor = (status: string) => {
     const normalizedStatus = status.toLowerCase();
-    if (normalizedStatus.includes('completed') || normalizedStatus.includes('done')) {
+    if (normalizedStatus.includes('completed') || normalizedStatus.includes('done') || normalizedStatus.includes('complete')) {
       return '#10b981';
     } else if (normalizedStatus.includes('in_progress') || normalizedStatus.includes('progress')) {
       return '#f59e0b';
@@ -219,10 +251,9 @@ export default function HistoryScreen() {
     }
     return '#6b7280';
   };
-
   const getStatusBackgroundColor = (status: string) => {
     const normalizedStatus = status.toLowerCase();
-    if (normalizedStatus.includes('completed') || normalizedStatus.includes('done')) {
+    if (normalizedStatus.includes('completed') || normalizedStatus.includes('done') || normalizedStatus.includes('complete')) {
       return '#d1fae5';
     } else if (normalizedStatus.includes('in_progress') || normalizedStatus.includes('progress')) {
       return '#fef3c7';
@@ -327,9 +358,8 @@ export default function HistoryScreen() {
       filtered = filtered.filter((audit) => {
         const status = audit.status.toLowerCase();
         if (statusFilter === 'pending') {
-          return status.includes('pending') || status.includes('in_progress');
-        } else if (statusFilter === 'completed') {
-          return status.includes('completed') || status.includes('done');
+          return status.includes('pending') || status.includes('in_progress');        } else if (statusFilter === 'completed') {
+          return status.includes('completed') || status.includes('done') || status.includes('complete');
         } else if (statusFilter === 'draft') {
           return status.includes('draft');
         }
@@ -452,7 +482,6 @@ export default function HistoryScreen() {
       </Screen>
     );
   }
-
   return (
     <Screen style={styles.container}>
       <View style={styles.header}>
@@ -460,7 +489,11 @@ export default function HistoryScreen() {
         <Text style={styles.subtitle}>
           {getFilteredAudits().length} of {audits.length} audit{audits.length !== 1 ? 's' : ''}
         </Text>
+      </View>
+      
+      <RejectionNotification />
 
+      <View style={styles.searchAndFilterContainer}>
         <View style={styles.searchContainer}>
           <View style={styles.searchInputContainer}>
             <MaterialIcons name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
@@ -496,8 +529,7 @@ export default function HistoryScreen() {
               onPress={() => setStatusFilter('completed')}
             >
               <Text style={[styles.filterText, statusFilter === 'completed' && styles.filterTextActive]}>Completed</Text>
-            </Pressable>
-            <Pressable
+            </Pressable>            <Pressable
               style={[styles.filterButton, statusFilter === 'draft' && styles.filterButtonActive]}
               onPress={() => setStatusFilter('draft')}
             >
@@ -1086,10 +1118,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#9ca3af',
     marginTop: 1,
-  },
-  searchContainer: {
+  },  searchContainer: {
     marginTop: 16,
     gap: 12,
+  },
+  searchAndFilterContainer: {
+    paddingHorizontal: 16,
   },
   searchInputContainer: {
     flexDirection: 'row',

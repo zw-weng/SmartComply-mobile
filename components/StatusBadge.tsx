@@ -6,11 +6,10 @@ interface StatusBadgeProps {
   style?: ViewStyle
 }
 
-const StatusBadge = ({ status, style }: StatusBadgeProps) => {
-  const getStatusStyle = (status: string) => {
+const StatusBadge = ({ status, style }: StatusBadgeProps) => {  const getStatusStyle = (status: string) => {
     const normalizedStatus = status.toLowerCase()
     
-    if (normalizedStatus.includes('completed') || normalizedStatus.includes('done')) {
+    if (normalizedStatus.includes('completed') || normalizedStatus.includes('done') || normalizedStatus.includes('complete')) {
       return styles.success
     } else if (normalizedStatus.includes('in_progress') || normalizedStatus.includes('progress')) {
       return styles.warning
@@ -21,11 +20,10 @@ const StatusBadge = ({ status, style }: StatusBadgeProps) => {
     }
     return styles.default
   }
-
   const getStatusTextStyle = (status: string) => {
     const normalizedStatus = status.toLowerCase()
     
-    if (normalizedStatus.includes('completed') || normalizedStatus.includes('done')) {
+    if (normalizedStatus.includes('completed') || normalizedStatus.includes('done') || normalizedStatus.includes('complete')) {
       return styles.successText
     } else if (normalizedStatus.includes('in_progress') || normalizedStatus.includes('progress')) {
       return styles.warningText

@@ -104,7 +104,41 @@ export default function Index() {
         }
       }
 
-      const audits = finalAudits
+      let audits = finalAudits
+
+      // Auto-migrate audits: update status to 'complete' for audits with 'pass' result but 'pending' status
+      const auditsToUpdate = audits.filter(audit => 
+        audit.result === 'pass' && audit.status === 'pending'
+      );
+
+      if (auditsToUpdate.length > 0) {
+        console.log(`Dashboard: Found ${auditsToUpdate.length} audits to migrate from pending to complete status`);
+        
+        try {
+          const updatePromises = auditsToUpdate.map(audit =>
+            supabase
+              .from('audit')
+              .update({ status: 'complete' })
+              .eq('id', audit.id)
+              .eq('user_id', user.id)
+          );
+
+          await Promise.all(updatePromises);
+          
+          // Update the local data to reflect the changes
+          audits = audits.map(audit => {
+            if (audit.result === 'pass' && audit.status === 'pending') {
+              return { ...audit, status: 'complete' };
+            }
+            return audit;
+          });
+          
+          console.log(`Dashboard: Successfully migrated ${auditsToUpdate.length} audits to complete status`);
+        } catch (migrationError) {
+          console.error('Dashboard: Failed to migrate audit statuses:', migrationError);
+          // Continue with original data if migration fails
+        }
+      }
 
       // Debug: Log audit status and result values
       console.log('Audit data for statistics:', audits.map(audit => ({
@@ -117,7 +151,7 @@ export default function Index() {
       // Calculate statistics
       const totalAudits = audits.length
       const pendingAudits = audits.filter(audit => audit.status === 'pending').length
-      const completedAudits = audits.filter(audit => audit.status === 'completed').length
+      const completedAudits = audits.filter(audit => audit.status === 'completed' || audit.status === 'complete').length
       const draftAudits = audits.filter(audit => audit.status === 'draft').length
       const failedAudits = audits.filter(audit => audit.result === 'failed').length
       
